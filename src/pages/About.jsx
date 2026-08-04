@@ -8,7 +8,7 @@ export default function About() {
 
   useEffect(() => {
     if (!isConfigured) return
-    supabase.from('sources').select('name, url, notes').eq('enabled', true).order('name')
+    supabase.from('sources').select('name, url, site_url, notes').eq('enabled', true).order('name')
       .then(({ data }) => setSources(data ?? []))
     supabase.from('ingest_runs').select('*').order('started_at', { ascending: false }).limit(1)
       .maybeSingle()
@@ -81,8 +81,9 @@ export default function About() {
         <ul className="mt-3 space-y-2">
           {sources.map((s) => (
             <li key={s.name} className="rounded-lg border border-ink-200 bg-white p-3">
+              {/* 링크는 사람이 보는 사이트로 건다. 피드 주소(s.url)를 걸면 RSS·JSON 원본이 그대로 열린다. */}
               <a
-                href={s.url}
+                href={s.site_url ?? s.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm font-semibold text-brand-700 hover:underline"
@@ -90,6 +91,10 @@ export default function About() {
                 {s.name}
               </a>
               {s.notes && <p className="mt-0.5 text-xs text-ink-500">{s.notes}</p>}
+              {/* 어떤 엔드포인트를 읽는지는 출처 투명성 차원에서 밝히되, 링크로 걸지는 않는다 */}
+              <p className="mt-1 truncate font-mono text-[11px] text-ink-400" title={s.url}>
+                {s.url}
+              </p>
             </li>
           ))}
         </ul>
