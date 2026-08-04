@@ -267,8 +267,10 @@ insert into sources (name, kind, url, max_items, notes) values
   ('Product Hunt', 'atom', 'https://www.producthunt.com/feed', 15,
    'Atom 피드. 신규 출시 제품 위주 — 모델보다 제품 성격이 강하니 AI가 걸러낸다.'),
   ('Hacker News (Show HN)', 'hn_algolia',
-   'https://hn.algolia.com/api/v1/search_by_date?tags=show_hn&hitsPerPage=30', 15,
-   '창업자 직접 런칭 글. points 낮은 건 ingest 단계에서 컷.'),
+   'https://hn.algolia.com/api/v1/search?tags=show_hn&numericFilters=points%3E3&hitsPerPage=30', 15,
+   '창업자가 직접 올리는 런칭 글. points 로 랭킹되는 /search 엔드포인트를 쓴다 — search_by_date 는 갓 올라온 글이라 점수가 0에 수렴해 전부 걸러진다.'),
   ('TechCrunch', 'rss', 'https://techcrunch.com/feed/', 10,
-   '자금조달·사업 뉴스. 회사 소개가 아닌 기사가 섞이므로 AI 판별 의존도가 높다.')
+   '자금조달·사업 뉴스. 회사 소개가 아닌 기사가 섞이므로 AI 판별 의존도가 높다.'),
+  ('TechCrunch Venture', 'rss', 'https://techcrunch.com/category/venture/feed/', 12,
+   '투자유치 전용 피드. 18건 중 13건에 금액이 명시돼 있어 funding 데이터의 주력 소스다. description 이 요약뿐이라 기사 본문을 따로 받아온다.')
 on conflict (name) do update set url = excluded.url, kind = excluded.kind, notes = excluded.notes;
