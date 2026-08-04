@@ -1,0 +1,88 @@
+# BizAtlas
+
+전세계 비즈니스 모델을 **같은 축으로 분해해 비교**하는 아카이브. 매일 자동 수집·구조화된다.
+
+링크 모음이 아니라는 게 요점이다. 수집은 누구나 한다 — 차별점은 수집한 것을 자유 텍스트가 아니라
+**통제 어휘(taxonomy)로 태깅**해서, "구독 모델이면서 자본이 거의 안 들고 한국에서도 통할 만한 것"
+같은 질문을 필터 한 번으로 던질 수 있게 만드는 데 있다.
+
+## 구조화 축
+
+| 축 | 값 |
+|---|---|
+| 수익 모델 | 구독 / 사용량 과금 / 거래 수수료 / 마켓플레이스 / 광고 / 프리미엄 … (13종) |
+| 해자 | 네트워크 효과 / 데이터 우위 / 전환 비용 / 브랜드 / 규제 … (10종) |
+| 고객 유형 | B2B / B2C / B2B2C / D2C / B2G / P2P |
+| 산업 | 20종 |
+| 자본 집약도 | 1(노트북 한 대) ~ 5(공장·인허가) |
+| 복제 용이성 | 1(따라하기 어려움) ~ 5(주말이면 복제) |
+| 한국 적용성 | 1(규제·문화상 부적합) ~ 5(바로 통함) |
+
+어휘는 코드가 아니라 `taxonomy` 테이블에 있다. 축을 늘려도 재배포가 필요 없다.
+
+## 스택
+
+- **프론트엔드** — Vite + React 19 + Tailwind v4, GitHub Pages 배포 (HashRouter)
+- **DB** — Supabase Postgres (프로젝트 `skalhldjvspoaacdxgjg`, 서울 리전)
+- **수집** — Supabase Edge Function (`ingest`) + Gemini, GitHub Actions 로 매일 07:00 KST 트리거
+
+## 수집 파이프라인
+
+```
+소스 fetch → 정규화 → 중복 컷 → 얇은 원문 사전 컷 → Gemini 구조화 → 어휘 검증 → insert
+```
+
+소스는 `sources` 테이블에서 켜고 끈다 (코드 수정 불필요).
+
+| 소스 | 형식 | 비고 |
+|---|---|---|
+| Y Combinator | 공개 JSON API | 구조화 필드가 풍부해 품질이 가장 좋다 |
+| Product Hunt | Atom | 피드 본문이 태그라인 한 줄뿐인 경우가 많아 수율이 낮다 |
+| Hacker News (Show HN) | Algolia API | `/search`(points 랭킹) 사용 — `search_by_date` 는 신규 글이라 점수가 0이라 전부 걸러진다 |
+| TechCrunch | RSS | 회사 소개가 아닌 기사가 섞여 AI 판별 의존도가 높다 |
+
+설계상 지켜야 하는 제약:
+
+- **Gemini 무료 티어는 분당 20회.** 초과하면 429 가 연쇄로 터진다. `RPM_LIMIT`(기본 8)로 호출
+  시작 간격을 강제하고, 429 시 워커별이 아니라 **전역 슬롯**을 뒤로 민다.
+- **Supabase 엣지 함수는 150초 idle timeout.** 새 호출 시작은 `TIME_BUDGET_MS`(95초)에서 멈춘다.
+- **한 번 판정한 항목은 `seen_items` 에 남겨 다시 AI 에 태우지 않는다.** 반려된 것도 남긴다.
+  실패(에러)한 것만 남기지 않아 다음 실행에서 재시도된다.
+
+## 로컬 실행
+
+```bash
+npm install
+cp .env.example .env   # VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 채우기
+npm run dev
+```
+
+## 배포
+
+`main` 에 푸시하면 GitHub Actions 가 Pages 로 배포한다.
+
+필요한 repo secret:
+
+| 이름 | 용도 |
+|---|---|
+| `VITE_SUPABASE_URL` | 프론트 빌드 |
+| `VITE_SUPABASE_ANON_KEY` | 프론트 빌드 (공개돼도 되는 값 — RLS 로 읽기 전용 보장) |
+| `INGEST_SECRET` | 수집 함수 호출 인증 |
+
+Supabase 엣지 함수 secret (`supabase secrets set`):
+
+| 이름 | 용도 |
+|---|---|
+| `GEMINI_API_KEY` | 구조화 |
+| `INGEST_SECRET` | 호출 인증 (repo secret 과 동일 값) |
+
+## 보안
+
+- 클라이언트는 **읽기 전용**이다. RLS 로 `businesses`(published 만) · `taxonomy` · `sources` ·
+  `ingest_runs` 만 열려 있고, 쓰기는 service_role 을 쓰는 엣지 함수만 가능하다.
+- `seen_items` 는 정책을 주지 않아 anon 에게 완전히 차단된다 (파이프라인 내부 정보).
+
+## 데이터 신뢰도
+
+분류와 1~5 척도는 AI 가 **공개된 소개 문구만 읽고** 매긴 값이다. 실제 재무·경쟁 상황을 반영하지
+않으며 틀릴 수 있다. 탐색·발상용이며, 판단 전에는 원문과 1차 자료를 확인해야 한다.
