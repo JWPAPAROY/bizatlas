@@ -6,22 +6,22 @@
 **통제 어휘(taxonomy)로 태깅**해서, "구독 모델이면서 자본이 거의 안 들고 한국에서도 통할 만한 것"
 같은 질문을 필터 한 번으로 던질 수 있게 만드는 데 있다.
 
-> ### ⚠️ 설정 대기 중: `DART_API_KEY`
+> ### ⚠️ 한국 검증은 로컬 스크립트로만 돌아간다
 >
-> 한국 기업 검증기(`region: "korea"`)는 **코드와 스키마가 모두 준비돼 있으나 키가 없어 동작하지 않는다.**
-> [opendart.fss.or.kr](https://opendart.fss.or.kr/) 에서 무료 발급 후 아래 두 단계를 실행하면 켜진다.
+> `opendart.fss.or.kr` 은 **TLS 1.2 + AES128-GCM-SHA256**(RSA 키 교환, 순방향 비밀성 없음)을 쓴다.
+> Supabase 엣지 함수의 Deno 런타임은 rustls 기반이라 이 암호군을 의도적으로 지원하지 않아
+> 핸드셰이크 단계에서 실패한다(`received fatal alert: HandshakeFailure`).
+> Node 는 OpenSSL 이라 문제없으므로 **한국 시드는 `scripts/seed-korea.mjs` 로 로컬 실행**한다.
+> 엣지 함수 `seed-proven` 의 `region: "korea"` 경로는 같은 이유로 쓸 수 없다(글로벌 경로는 정상).
 >
 > ```bash
-> # 1) 엣지 함수 시크릿 등록
-> supabase secrets set DART_API_KEY=xxxxx     # 또는 Management API /v1/projects/{ref}/secrets
+> # 법인 고유번호 적재 (최초 1회, 이후 분기 1회면 충분 — 현재 118,583건 적재됨)
+> DART_API_KEY=xx SUPABASE_URL=xx SUPABASE_SERVICE_ROLE_KEY=xx node scripts/sync-dart-corps.mjs
 >
-> # 2) 법인 고유번호 10만 건 적재 (최초 1회, 이후 분기 1회면 충분)
-> DART_API_KEY=xxx SUPABASE_URL=https://skalhldjvspoaacdxgjg.supabase.co \
->   SUPABASE_SERVICE_ROLE_KEY=xxx node scripts/sync-dart-corps.mjs
+> # 한국 검증 코퍼스 시드 (카테고리 생략 시 proven 이 가장 빈약한 곳을 자동 선택)
+> DART_API_KEY=xx GEMINI_API_KEY=xx SUPABASE_URL=xx SUPABASE_SERVICE_ROLE_KEY=xx \
+>   node scripts/seed-korea.mjs fintech 8
 > ```
->
-> 키가 없으면 `region: "korea"` 호출은 HTTP 400 으로 명시적으로 거부된다(조용히 실패하지 않는다).
-> 글로벌 시드(Wikidata 경로)는 키 없이도 정상 동작한다.
 
 ## 구조화 축
 
@@ -86,19 +86,15 @@ DART 조회에서 실제로 밟은 함정 세 가지:
 엔티티 자체가 없고 카카오페이·아프리카TV·리디도 데이터 공백으로 탈락한다. DART 는 고유번호 기반이라
 EDGAR 같은 이름 전문검색 오탐도 없다.
 
-**DART 는 서비스명이 아니라 법인명으로 등록돼 있다** (배달의민족 → 우아한형제들, 토스 → 비바리퍼블리카).
-그래서 후보 생성 시 `corp_name_kr`(법인 정식명칭)을 함께 받아 그것으로 조회한다.
-
 호출:
 
 ```bash
-# 글로벌 (category 생략 시 proven 이 가장 빈약한 카테고리를 자동 선택)
+# 글로벌 — 엣지 함수 (category 생략 시 proven 이 가장 빈약한 카테고리를 자동 선택)
 curl -X POST .../functions/v1/seed-proven -H "x-ingest-secret: ..." \
   -d '{"category":"fintech","count":10}'
 
-# 한국 (DART_API_KEY 필요)
-curl -X POST .../functions/v1/seed-proven -H "x-ingest-secret: ..." \
-  -d '{"category":"fintech","count":10,"region":"korea"}'
+# 한국 — 로컬 스크립트 (위 TLS 제약 참고)
+node scripts/seed-korea.mjs fintech 8
 ```
 
 ## 수집 파이프라인
@@ -177,13 +173,13 @@ Supabase 엣지 함수 secret:
 |---|---|---|
 | `GEMINI_API_KEY` | 구조화 (bizatlas 전용 키 — investar 와 쿼터를 나누지 않는다) | 설정됨 |
 | `INGEST_SECRET` | 수집·시드 함수 호출 인증 | 설정됨 |
-| **`DART_API_KEY`** | **한국 기업 검증 (`region: "korea"`)** | **미설정 — 발급 필요** |
+| `DART_API_KEY` | 등록은 돼 있으나 **엣지 함수에서는 쓸 수 없다**(위 TLS 제약). 실제 사용은 로컬 스크립트. | 설정됨 |
 
 로컬 `.secrets/` (repo 에 커밋 금지):
 
 | 파일 | 용도 |
 |---|---|
-| `supabase-pat.txt` | Supabase PAT · `INGEST_SECRET` · Gemini 키 |
+| `supabase-pat.txt` | Supabase PAT · `INGEST_SECRET` · Gemini 키 · DART 키 |
 | `bizatlas-gh-token.txt` | GitHub PAT (`repo` + `workflow`) |
 
 GitHub repo secret: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (빌드용), `INGEST_SECRET`
