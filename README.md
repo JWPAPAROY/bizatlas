@@ -63,24 +63,26 @@ npm run dev
 
 ## 배포
 
-```powershell
-.\deploy.ps1    # 빌드 → gh-pages 브랜치 푸시 → Pages 반영
-```
+**`main` 에 푸시하면 자동 배포된다** (`.github/workflows/deploy.yml` → GitHub Pages).
+필요한 repo secret 은 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (등록 완료).
 
-GitHub Pages 는 `gh-pages` 브랜치를 소스로 쓴다.
+수동 배포가 필요하면 `.\deploy.ps1` 로 `gh-pages` 브랜치에 직접 올릴 수도 있다.
+단 Pages 소스는 Actions 이므로 평소에는 쓸 일이 없다.
 
-> **push-to-deploy 로 전환하려면**: 현재 gh 토큰에 `workflow` 스코프가 없어 워크플로 파일을
-> 푸시할 수 없다. `gh auth refresh -h github.com -s workflow` 를 한 번 실행한 뒤
-> `.gitignore` 에서 `.github/workflows/` 줄을 지우고 `.github/workflows/deploy.yml` 을 커밋하면,
-> `main` 푸시마다 Actions 가 자동 배포한다. 그때 Pages 소스를 "GitHub Actions" 로 바꿔야 한다.
-> 필요한 repo secret 은 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (이미 등록돼 있음).
+### 자격증명
 
-이 repo 는 자격증명이 로컬 설정으로 `JWPAPAROY` 에 고정돼 있다 (다른 프로젝트는 `knwwhr` 사용).
+이 PC 에는 GitHub 계정이 둘이라 (`gh` = JWPAPAROY, 시스템 credential manager = knwwhr)
+**이 repo 에서만** 토큰을 갈아끼워 쓴다. 전역 설정을 바꾸면 knwwhr 프로젝트 푸시가 깨진다.
 
 ```bash
-git config --local credential.helper ""
-git config --local --add credential.helper "!gh auth git-credential"
+git config --local credential.helper ""      # 시스템 manager 무력화 (빈 값이 목록을 리셋)
+git config --local --add credential.helper \
+  '!f() { echo username=JWPAPAROY; echo "password=$(cat /c/Users/knoww/.secrets/bizatlas-gh-token.txt)"; }; f'
 ```
+
+토큰에는 `repo` + **`workflow`** 스코프가 필요하다. `workflow` 가 없으면
+`.github/workflows/*.yml` 푸시만 거부된다. gh CLI 의 OAuth 토큰에는 이 스코프가 없어
+별도 PAT 을 `.secrets/bizatlas-gh-token.txt` 에 두고 쓴다.
 
 Supabase 엣지 함수 secret:
 
