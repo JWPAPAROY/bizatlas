@@ -195,6 +195,64 @@ export default function Detail() {
         )}
       </Section>
 
+      {(biz.startup_scale || biz.korea_analog_note || biz.korea_analogs?.length > 0
+        || biz.regulatory_notes?.length > 0) && (
+        <Section title="한국에서 시작한다면">
+          <p className="mb-3 text-xs text-ink-400">
+            점수만으로는 다음 행동이 나오지 않아 덧붙인 항목입니다.
+            <strong> 아래는 전부 AI 가 생성한 것</strong>이며, 특히 회사명은 사실과 다를 수 있으니
+            반드시 직접 확인하세요.
+          </p>
+
+          <dl className="space-y-3">
+            {biz.startup_scale && (
+              <div>
+                <dt className="text-sm font-medium text-ink-700">최소 시작 규모</dt>
+                <dd className="mt-0.5 text-sm leading-relaxed text-ink-600">{biz.startup_scale}</dd>
+              </div>
+            )}
+
+            {(biz.korea_analogs?.length > 0 || biz.korea_analog_note) && (
+              <div>
+                <dt className="text-sm font-medium text-ink-700">국내 유사 사업자</dt>
+                <dd className="mt-0.5">
+                  {biz.korea_analogs?.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {biz.korea_analogs.map((a) => (
+                        <span key={a} className="rounded-md bg-ink-100 px-2 py-0.5 text-sm text-ink-700">
+                          {a}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-ink-500">AI 가 아는 범위에서는 없음</span>
+                  )}
+                  {biz.korea_analog_note && (
+                    <p className="mt-1 text-sm leading-relaxed text-ink-600">{biz.korea_analog_note}</p>
+                  )}
+                </dd>
+              </div>
+            )}
+
+            {biz.regulatory_notes?.length > 0 && (
+              <div>
+                <dt className="text-sm font-medium text-ink-700">규제 체크포인트</dt>
+                <dd className="mt-1">
+                  <ul className="space-y-1">
+                    {biz.regulatory_notes.map((r, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-ink-600">
+                        <span className="mt-0.5 shrink-0 text-ink-300">·</span>
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </Section>
+      )}
+
       {biz.why_it_works && (
         <Section title="왜 작동하는가">
           <p className="text-sm leading-relaxed whitespace-pre-line text-ink-700">{biz.why_it_works}</p>

@@ -73,6 +73,22 @@ const ROWS = [
     ),
   })),
   { key: 'korea_note', label: '한국 적용성 근거', render: (b) => b.korea_note ?? '—' },
+  { key: 'startup_scale', label: '최소 시작 규모', render: (b) => b.startup_scale ?? '—' },
+  {
+    key: 'korea_analogs',
+    label: '국내 유사 사업자',
+    render: (b) => (b.korea_analogs?.length ? b.korea_analogs.join(', ') : 'AI 가 아는 범위에선 없음'),
+  },
+  {
+    key: 'regulatory_notes',
+    label: '규제 체크포인트',
+    render: (b) =>
+      b.regulatory_notes?.length ? (
+        <ul className="list-disc space-y-1 pl-4">
+          {b.regulatory_notes.map((r, i) => <li key={i}>{r}</li>)}
+        </ul>
+      ) : '—',
+  },
   { key: 'why_it_works', label: '왜 작동하는가', render: (b) => b.why_it_works ?? '—' },
   {
     key: 'risks',

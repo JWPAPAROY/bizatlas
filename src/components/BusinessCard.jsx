@@ -73,10 +73,20 @@ export default function BusinessCard({ biz }) {
         </p>
       )}
 
-      <div className="mt-3 flex items-center justify-between border-t border-ink-100 pt-2.5">
-        <span className="text-xs text-ink-400">한국 적용성</span>
-        <Scale value={biz.korea_fit} tone="good" compact />
-      </div>
+      {/* 세 축을 나란히 둔다. 한국 적용성만 카드에 띄우면 그 축이 대표 지표처럼 읽히는데,
+          자본·복제와 함께 봐야 판단이 되는 값이라 하나만 앞세우면 오해를 부른다. */}
+      <dl className="mt-3 space-y-1 border-t border-ink-100 pt-2.5">
+        {[
+          ['capital_intensity', '자본', 'warn'],
+          ['replicability', '복제', 'warn'],
+          ['korea_fit', '한국', 'good'],
+        ].map(([key, short, tone]) => (
+          <div key={key} className="flex items-center justify-between">
+            <dt className="text-xs text-ink-400">{short}</dt>
+            <dd><Scale value={biz[key]} tone={tone} compact /></dd>
+          </div>
+        ))}
+      </dl>
     </article>
   )
 }
