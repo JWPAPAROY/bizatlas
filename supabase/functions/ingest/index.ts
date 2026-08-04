@@ -389,13 +389,15 @@ async function structureOne(
       body,
     })
 
-    if (res.status === 429) {
+    // 429 = 그 모델의 하루치 소진, 5xx = 일시적 과부하(HTTP 503 "high demand").
+    // 어느 쪽이든 그 모델을 붙잡고 기다릴 이유가 없으니 다음 모델로 넘어간다.
+    if (res.status === 429 || res.status >= 500) {
       await res.text()
       // 다른 워커가 이미 모델을 넘겼을 수 있으므로 현재 값과 비교해서만 올린다.
       const exhausted = GEMINI_MODELS.indexOf(model)
       if (exhausted === modelIndex) modelIndex++
       if (modelIndex >= GEMINI_MODELS.length) {
-        throw new Error(`Gemini 일일 쿼터 소진 (모델 ${GEMINI_MODELS.length}개 전부) — 다음 실행으로 이월`)
+        throw new Error(`Gemini 쿼터 소진 (모델 ${GEMINI_MODELS.length}개 전부) — 다음 실행으로 이월`)
       }
       continue
     }

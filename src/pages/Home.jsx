@@ -16,6 +16,13 @@ const EMPTY = {
   capital_max: 5,
 }
 
+// 검증된 모델을 기본으로 보여준다. 신생 스타트업만 잔뜩 보이면 아직 작동하는지도 모르는
+// 회사들이 첫 화면을 채워 신뢰가 생기지 않는다.
+const TIERS = {
+  proven: { label: '검증된 모델', hint: '설립 5년 이상 · 공개 데이터로 실체와 규모가 확인된 회사' },
+  emerging: { label: '최신 동향', hint: '자동 수집된 신생 서비스 · 아직 검증되지 않음' },
+}
+
 const SORTS = {
   newest: { label: '최신순', column: 'created_at', ascending: false },
   korea: { label: '한국 적용성', column: 'korea_fit', ascending: false },
@@ -25,6 +32,7 @@ const SORTS = {
 
 export default function Home() {
   const [filters, setFilters] = useState(EMPTY)
+  const [tier, setTier] = useState('proven')
   const [query, setQuery] = useState('')       // 입력 중인 값
   const [sort, setSort] = useState('newest')
   const [rows, setRows] = useState([])
@@ -41,7 +49,7 @@ export default function Home() {
   }, [query])
 
   // 필터가 바뀌면 항상 1페이지부터
-  useEffect(() => { setPage(0) }, [filters, sort])
+  useEffect(() => { setPage(0) }, [filters, sort, tier])
 
   const activeCount = useMemo(() => {
     let n = 0
@@ -63,7 +71,9 @@ export default function Home() {
     setLoading(true)
     setError(null)
 
-    let q = supabase.from('businesses').select('*', { count: 'exact' }).eq('status', 'published')
+    let q = supabase.from('businesses').select('*', { count: 'exact' })
+      .eq('status', 'published')
+      .eq('tier', tier)
 
     if (filters.q.trim()) {
       q = q.textSearch('search_tsv', filters.q.trim(), { config: 'simple', type: 'websearch' })
@@ -88,7 +98,7 @@ export default function Home() {
       setCount(total ?? 0)
     }
     setLoading(false)
-  }, [filters, sort, page])
+  }, [filters, sort, page, tier])
 
   useEffect(() => { load() }, [load])
 
@@ -107,6 +117,22 @@ export default function Home() {
       </section>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg border border-ink-200 bg-white p-0.5">
+          {Object.entries(TIERS).map(([key, t]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTier(key)}
+              title={t.hint}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                tier === key ? 'bg-brand-600 text-white' : 'text-ink-500 hover:text-ink-800'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         <div className="relative min-w-56 flex-1">
           <Search size={16} className="absolute top-1/2 left-3 -translate-y-1/2 text-ink-400" />
           <input
@@ -150,6 +176,7 @@ export default function Home() {
         <div>
           <div className="mb-3 text-sm text-ink-500">
             {loading ? '불러오는 중…' : `${count.toLocaleString()}건`}
+            <span className="ml-2 text-xs text-ink-400">{TIERS[tier].hint}</span>
           </div>
 
           {error && (

@@ -58,6 +58,15 @@ export default function BusinessCard({ biz }) {
         )}
       </div>
 
+      {/* 검증된 모델은 왜 검증됐는지를 카드에서 바로 보여준다 */}
+      {biz.tier === 'proven' && biz.evidence?.scale && (
+        <p className="mt-2 truncate text-xs text-ink-500" title={`${biz.evidence.scale} · 업력 ${biz.evidence.age_years}년`}>
+          <span className="mr-1 rounded bg-ink-100 px-1 py-0.5 font-medium text-ink-600">검증</span>
+          {biz.evidence.scale}
+          {biz.evidence.age_years != null && ` · 업력 ${biz.evidence.age_years}년`}
+        </p>
+      )}
+
       {biz.traction?.funding && (
         <p className="mt-2 truncate text-xs font-medium text-emerald-700" title={biz.traction.funding}>
           투자유치 {biz.traction.funding}

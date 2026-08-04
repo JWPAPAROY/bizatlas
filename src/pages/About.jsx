@@ -45,6 +45,27 @@ export default function About() {
       </section>
 
       <section className="mt-8">
+        <h2 className="text-lg font-semibold">두 가지 등급</h2>
+        <div className="mt-3 space-y-3">
+          <div className="rounded-lg border border-ink-200 bg-white p-3">
+            <h3 className="text-sm font-semibold">검증된 모델 (기본 화면)</h3>
+            <p className="mt-1 text-sm text-ink-600">
+              설립 5년 이상이고, 공개 데이터로 실체와 규모가 확인된 회사입니다. 회사 후보를 뽑은 뒤
+              Wikidata 에서 설립일·매출·직원수를 조회해 세 관문(업력·실체·규모)을 통과한 것만 넣습니다.
+              <strong>숫자는 Wikidata 가, 구조 해석만 AI 가</strong> 담당합니다.
+            </p>
+          </div>
+          <div className="rounded-lg border border-ink-200 bg-white p-3">
+            <h3 className="text-sm font-semibold">최신 동향</h3>
+            <p className="mt-1 text-sm text-ink-600">
+              아래 소스에서 자동 수집한 신생 서비스입니다. 아직 모델이 검증되지 않았으므로
+              참고용으로만 보세요.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-8">
         <h2 className="text-lg font-semibold">수집 방식</h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-700">
           매일 1회 아래 소스를 읽어, 새로 올라온 항목만 AI가 구조화합니다.

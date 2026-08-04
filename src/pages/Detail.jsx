@@ -195,6 +195,36 @@ export default function Detail() {
         </Section>
       )}
 
+      {biz.tier === 'proven' && biz.evidence?.source && (
+        <Section title="검증 근거">
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[
+              ['업력', biz.evidence.age_years != null ? `${biz.evidence.age_years}년` : null],
+              ['설립', biz.evidence.inception],
+              ['규모', biz.evidence.scale],
+              ['직원', biz.evidence.employees ? `${Number(biz.evidence.employees).toLocaleString()}명` : null],
+            ].filter(([, v]) => v).map(([k, v]) => (
+              <div key={k} className="rounded-lg border border-ink-200 p-2.5">
+                <dt className="text-xs text-ink-400">{k}</dt>
+                <dd className="mt-0.5 text-sm font-semibold">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-2 text-xs text-ink-400">
+            설립일·매출·직원수는 AI 가 아니라{' '}
+            <a
+              href={biz.evidence.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-700 hover:underline"
+            >
+              Wikidata {biz.evidence.entity}
+            </a>
+            에서 가져온 값입니다. 아래 분류·점수만 AI 가 매겼습니다.
+          </p>
+        </Section>
+      )}
+
       <Section title="출처">
         <p className="text-sm text-ink-600">
           {biz.source_name}
