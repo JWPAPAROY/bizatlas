@@ -68,7 +68,7 @@ export default function About() {
       <section className="mt-8">
         <h2 className="text-lg font-semibold">수집 방식</h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-700">
-          매일 1회 아래 소스를 읽어, 새로 올라온 항목만 AI가 구조화합니다.
+          4시간마다 아래 소스를 읽어, 새로 올라온 항목만 AI가 구조화합니다.
           회사·비즈니스 모델로 볼 수 없는 항목(일반 뉴스, 수익 구조를 알 수 없는 툴 소개 등)은
           자동 반려되며, 한 번 판정한 항목은 다시 처리하지 않습니다.
         </p>
