@@ -21,9 +21,10 @@ export default function About() {
 
       <p className="mt-3 text-sm leading-relaxed text-ink-700">
         비즈니스 모델 정보는 이미 넘칩니다. 부족한 건 <strong>비교 가능한 형태</strong>입니다.
-        BizAtlas는 전세계에서 수집한 서비스를 매번 같은 축으로 분해해 저장합니다.
-        그래서 “구독 모델이면서 자본이 거의 안 들고 한국에서도 통할 만한 것”처럼
-        평소엔 검색으로 못 던지는 질문을 필터 한 번으로 물을 수 있습니다.
+        BizAtlas는 전세계에서 모은 서비스를 매번 같은 축으로 분해해 저장합니다.
+        그래서 <em className="not-italic font-medium text-ink-900">
+          구독 모델이면서 자본이 거의 안 들고 한국에서도 통할 만한 것
+        </em>처럼 평소엔 검색으로 못 던지는 질문을 필터 한 번으로 물을 수 있습니다.
       </p>
 
       <section className="mt-8">
@@ -50,27 +51,32 @@ export default function About() {
           <div className="rounded-lg border border-ink-200 bg-white p-3">
             <h3 className="text-sm font-semibold">검증된 모델 (기본 화면)</h3>
             <p className="mt-1 text-sm text-ink-600">
-              설립 5년 이상이고, 공개 데이터로 실체와 규모가 확인된 회사입니다. 회사 후보를 뽑은 뒤
-              Wikidata 에서 설립일·매출·직원수를 조회해 세 관문(업력·실체·규모)을 통과한 것만 넣습니다.
-              <strong>숫자는 Wikidata 가, 구조 해석만 AI 가</strong> 담당합니다.
+              설립 5년 이상이고, 공개 데이터로 실체와 규모가 확인된 회사입니다.
+              회사 후보를 뽑은 뒤 세 관문(업력 · 기업 실체 · 규모)을 통과한 것만 넣습니다.
+              해외 기업은 <strong>Wikidata</strong>, 한국 기업은 <strong>DART 전자공시</strong>에서
+              설립일과 매출을 조회합니다.
+            </p>
+            <p className="mt-1.5 text-sm text-ink-600">
+              <strong>숫자는 이 공개 데이터가, 구조 해석만 AI 가</strong> 담당합니다.
+              통과 근거는 각 항목 상세 페이지 맨 위에 출처 링크와 함께 그대로 보여줍니다.
             </p>
           </div>
           <div className="rounded-lg border border-ink-200 bg-white p-3">
             <h3 className="text-sm font-semibold">최신 동향</h3>
             <p className="mt-1 text-sm text-ink-600">
-              아래 소스에서 자동 수집한 신생 서비스입니다. 아직 모델이 검증되지 않았으므로
-              참고용으로만 보세요.
+              아래 소스에서 자동 수집한 신생 서비스입니다. 아직 모델이 검증되지 않았고
+              공개된 소개 문구만 근거로 분류했으므로 참고용으로만 보세요.
             </p>
           </div>
         </div>
       </section>
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold">수집 방식</h2>
+        <h2 className="text-lg font-semibold">최신 동향은 어디서 오나</h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-700">
           4시간마다 아래 소스를 읽어, 새로 올라온 항목만 AI가 구조화합니다.
-          회사·비즈니스 모델로 볼 수 없는 항목(일반 뉴스, 수익 구조를 알 수 없는 툴 소개 등)은
-          자동 반려되며, 한 번 판정한 항목은 다시 처리하지 않습니다.
+          회사·비즈니스 모델로 볼 수 없는 항목(일반 뉴스, 벤처캐피털의 펀드 결성 기사,
+          수익 구조를 알 수 없는 툴 소개 등)은 자동 반려되며, 한 번 판정한 항목은 다시 처리하지 않습니다.
         </p>
         <ul className="mt-3 space-y-2">
           {sources.map((s) => (
@@ -99,10 +105,13 @@ export default function About() {
       <section className="mt-8 rounded-lg border border-amber-200 bg-amber-50 p-4">
         <h2 className="text-sm font-semibold text-amber-900">한계</h2>
         <p className="mt-1 text-sm leading-relaxed text-amber-900">
-          분류와 1~5점 척도는 AI가 <strong>공개된 소개 문구만 읽고</strong> 매긴 값입니다.
-          실제 재무·경쟁 상황을 반영하지 않으며 틀릴 수 있습니다. 특히 매출·사용자 수는
-          원문에 명시된 것만 옮기므로 비어 있는 경우가 많습니다. 탐색과 아이디어 발상용으로
-          쓰시고, 실제 판단 전에는 반드시 원문과 1차 자료를 확인하세요.
+          <strong>수익 모델 · 해자 · 자본 집약도 · 복제 용이성 · 한국 적용성은 모두 AI 가 매긴 해석</strong>입니다.
+          검증된 모델이라도 이 점수까지 검증된 것은 아니며, 실제 재무·경쟁 상황을 반영하지 않아 틀릴 수 있습니다.
+          검증된 것은 설립일 · 매출 · 규모 같은 사실 정보뿐입니다.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-amber-900">
+          매출은 공시 의무가 있는 상장사만 채워지는 경우가 많습니다. 비상장 기업은 실체와 업력까지만
+          확인됩니다. 탐색과 아이디어 발상용으로 쓰시고, 실제 판단 전에는 반드시 원문과 1차 자료를 확인하세요.
         </p>
       </section>
     </div>

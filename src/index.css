@@ -30,5 +30,12 @@ body {
   background: var(--color-ink-50);
   color: var(--color-ink-900);
   -webkit-font-smoothing: antialiased;
-  font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  /* Windows 에서 system-ui 는 Segoe UI 로 잡히는데 한글 글리프가 없어 Malgun Gothic 으로 폴백된다.
+     그래서 한 문장 안에서 라틴 문자·따옴표만 다른 폰트로 그려져 깨져 보인다.
+     한글 폰트를 명시적으로 앞에 두어 섞임을 줄인다. */
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕",
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* 한국어는 단어 중간에서 줄바꿈되면 읽기 나쁘다 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
