@@ -1,10 +1,27 @@
 # BizAtlas
 
-전세계 비즈니스 모델을 **같은 축으로 분해해 비교**하는 아카이브. 매일 자동 수집·구조화된다.
+전세계 비즈니스 모델을 **같은 축으로 분해해 비교**하는 아카이브.
 
 링크 모음이 아니라는 게 요점이다. 수집은 누구나 한다 — 차별점은 수집한 것을 자유 텍스트가 아니라
 **통제 어휘(taxonomy)로 태깅**해서, "구독 모델이면서 자본이 거의 안 들고 한국에서도 통할 만한 것"
 같은 질문을 필터 한 번으로 던질 수 있게 만드는 데 있다.
+
+> ### ⚠️ 설정 대기 중: `DART_API_KEY`
+>
+> 한국 기업 검증기(`region: "korea"`)는 **코드와 스키마가 모두 준비돼 있으나 키가 없어 동작하지 않는다.**
+> [opendart.fss.or.kr](https://opendart.fss.or.kr/) 에서 무료 발급 후 아래 두 단계를 실행하면 켜진다.
+>
+> ```bash
+> # 1) 엣지 함수 시크릿 등록
+> supabase secrets set DART_API_KEY=xxxxx     # 또는 Management API /v1/projects/{ref}/secrets
+>
+> # 2) 법인 고유번호 10만 건 적재 (최초 1회, 이후 분기 1회면 충분)
+> DART_API_KEY=xxx SUPABASE_URL=https://skalhldjvspoaacdxgjg.supabase.co \
+>   SUPABASE_SERVICE_ROLE_KEY=xxx node scripts/sync-dart-corps.mjs
+> ```
+>
+> 키가 없으면 `region: "korea"` 호출은 HTTP 400 으로 명시적으로 거부된다(조용히 실패하지 않는다).
+> 글로벌 시드(Wikidata 경로)는 키 없이도 정상 동작한다.
 
 ## 구조화 축
 
@@ -24,11 +41,54 @@
 
 - **프론트엔드** — Vite + React 19 + Tailwind v4, GitHub Pages 배포 (HashRouter)
 - **DB** — Supabase Postgres (프로젝트 `skalhldjvspoaacdxgjg`, 서울 리전)
-- **수집** — Supabase Edge Function (`ingest`) + Gemini
+- **수집** — Supabase Edge Function `ingest`(최신 동향) / `seed-proven`(검증 코퍼스) + Gemini
+- **검증** — Wikidata(글로벌) / DART 전자공시(한국)
 - **스케줄** — Supabase 내부 `pg_cron` + `pg_net` 이 **4시간마다**(KST 01/05/09/13/17/21시) 수집 함수를 호출한다.
   외부 스케줄러(GitHub Actions)를 쓰지 않아 의존성이 하나 적고, 시크릿 사본도 GitHub 에 둘 필요가 없다.
 
 라이브: https://jwpaparoy.github.io/bizatlas/
+
+## 두 가지 등급 (tier)
+
+자동 수집만 두면 미국 초기 스타트업만 쌓인다(초기 데이터 기준 YC 96%, ai_infra 40%).
+아직 작동하는지 아무도 모르는 회사에 대해 AI 가 "작동하는 구조적 이유"를 쓰는 건 분석이 아니라 추측이다.
+그래서 등급을 나누고 **검증된 쪽을 화면 기본값**으로 삼는다.
+
+| tier | 채우는 방법 | 화면 |
+|---|---|---|
+| `proven` | `seed-proven`: 후보 생성(AI) → 실체·사실 조회 → 3관문 → 축 태깅(AI) | 기본 |
+| `emerging` | `ingest`: 소스 자동 수집 | "최신 동향" 토글 |
+
+**3관문** — 업력 5년 이상 / 기업 실체 확인 / 규모·저명성 확인. 통과 근거는 `evidence` 컬럼에 남기고 화면에 그대로 노출한다.
+
+핵심 원칙은 **역할 분리**다. 설립일·매출·직원수 같은 **숫자는 검증 소스가**, 수익모델·해자·한국 적용성 같은
+**구조 해석만 AI 가** 담당한다. 섞으면 AI 가 그럴듯한 수치를 지어낸다.
+
+### 검증 소스
+
+| 지역 | 소스 | 관문 매핑 |
+|---|---|---|
+| 글로벌 | Wikidata | 업력 = `P571` 설립일 / 실체 = `P31` 기업 타입 / 규모 = 매출·직원수·위키백과 언어판 수 |
+| 한국 | DART 전자공시 | 업력 = `company.json` 의 `est_dt` / 실체 = `corp_code` 존재 / 규모 = 상장사 매출 또는 외부감사 대상 사실 |
+
+**한국에 DART 를 쓰는 이유**: Wikidata 는 한국 기업 커버리지가 사실상 없다. 배달의민족·무신사는 기업
+엔티티 자체가 없고 카카오페이·아프리카TV·리디도 데이터 공백으로 탈락한다. DART 는 고유번호 기반이라
+EDGAR 같은 이름 전문검색 오탐도 없다.
+
+**DART 는 서비스명이 아니라 법인명으로 등록돼 있다** (배달의민족 → 우아한형제들, 토스 → 비바리퍼블리카).
+그래서 후보 생성 시 `corp_name_kr`(법인 정식명칭)을 함께 받아 그것으로 조회한다.
+
+호출:
+
+```bash
+# 글로벌 (category 생략 시 proven 이 가장 빈약한 카테고리를 자동 선택)
+curl -X POST .../functions/v1/seed-proven -H "x-ingest-secret: ..." \
+  -d '{"category":"fintech","count":10}'
+
+# 한국 (DART_API_KEY 필요)
+curl -X POST .../functions/v1/seed-proven -H "x-ingest-secret: ..." \
+  -d '{"category":"fintech","count":10,"region":"korea"}'
+```
 
 ## 수집 파이프라인
 
@@ -44,6 +104,15 @@
 | Product Hunt | Atom | 피드 본문이 태그라인 한 줄뿐인 경우가 많아 수율이 낮다 |
 | Hacker News (Show HN) | Algolia API | `/search`(points 랭킹) 사용 — `search_by_date` 는 신규 글이라 점수가 0이라 전부 걸러진다 |
 | TechCrunch | RSS | 회사 소개가 아닌 기사가 섞여 AI 판별 의존도가 높다 |
+| TechCrunch Venture | RSS | **투자유치 금액의 주력 소스** — 18건 중 13건에 금액이 명시된다 |
+
+투자유치·매출 지표는 **소스에 금액이 적혀 있어야** 들어온다. YC API 에는 투자 필드가 아예 없고
+(`teamSize`, `batch`, `status`, `tags` 뿐), 뉴스 RSS 는 `description` 이 요약 1~2문장뿐이라
+**기사 본문을 별도로 fetch** 한다(AI 비용 없음).
+
+검토했으나 채택하지 않은 것 — **SEC EDGAR Form D**: `efts.sec.gov` 는 기업명 검색이 아니라 공시
+전문검색이라 `Caution`·`Conifer` 같은 일반 단어 이름에서 오탐이 심하다(YC 10곳 테스트: 본체 매칭 0건,
+오탐 3건). 신생 스타트업은 아직 공시 전이고 미국 한정이라는 문제도 있다.
 
 설계상 지켜야 하는 제약:
 
@@ -89,20 +158,39 @@ git config --local --add credential.helper \
 `.github/workflows/*.yml` 푸시만 거부된다. gh CLI 의 OAuth 토큰에는 이 스코프가 없어
 별도 PAT 을 `.secrets/bizatlas-gh-token.txt` 에 두고 쓴다.
 
+## 시크릿 현황
+
 Supabase 엣지 함수 secret:
 
-| 이름 | 용도 |
+| 이름 | 용도 | 상태 |
+|---|---|---|
+| `GEMINI_API_KEY` | 구조화 (bizatlas 전용 키 — investar 와 쿼터를 나누지 않는다) | 설정됨 |
+| `INGEST_SECRET` | 수집·시드 함수 호출 인증 | 설정됨 |
+| **`DART_API_KEY`** | **한국 기업 검증 (`region: "korea"`)** | **미설정 — 발급 필요** |
+
+로컬 `.secrets/` (repo 에 커밋 금지):
+
+| 파일 | 용도 |
 |---|---|
-| `GEMINI_API_KEY` | 구조화 |
-| `INGEST_SECRET` | 호출 인증 (repo secret 과 동일 값) |
+| `supabase-pat.txt` | Supabase PAT · `INGEST_SECRET` · Gemini 키 |
+| `bizatlas-gh-token.txt` | GitHub PAT (`repo` + `workflow`) |
+
+GitHub repo secret: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (빌드용), `INGEST_SECRET`
+— `INGEST_SECRET` 은 수집을 pg_cron 으로 옮긴 뒤로 쓰이지 않지만, GitHub Actions 로 되돌릴 때를 위해 남겨둔다.
 
 ## 보안
 
 - 클라이언트는 **읽기 전용**이다. RLS 로 `businesses`(published 만) · `taxonomy` · `sources` ·
   `ingest_runs` 만 열려 있고, 쓰기는 service_role 을 쓰는 엣지 함수만 가능하다.
-- `seen_items` 는 정책을 주지 않아 anon 에게 완전히 차단된다 (파이프라인 내부 정보).
+- `seen_items` · `dart_corps` 는 정책을 주지 않아 anon 에게 완전히 차단된다 (파이프라인 내부 정보).
 
 ## 데이터 신뢰도
 
-분류와 1~5 척도는 AI 가 **공개된 소개 문구만 읽고** 매긴 값이다. 실제 재무·경쟁 상황을 반영하지
-않으며 틀릴 수 있다. 탐색·발상용이며, 판단 전에는 원문과 1차 자료를 확인해야 한다.
+**숫자와 해석의 출처가 다르다.**
+
+- 설립일·매출·직원수 등 사실 정보 → Wikidata / DART 에서 가져온 값. `evidence` 컬럼에 출처 링크와 함께 남는다.
+- 수익모델·해자·자본 집약도·복제 용이성·한국 적용성 → **AI 가 매긴 값**. 실제 재무·경쟁 상황을
+  반영하지 않으며 틀릴 수 있다.
+
+`emerging` 등급은 공개된 소개 문구만 읽고 만든 것이라 신뢰도가 더 낮다.
+탐색·발상용이며, 판단 전에는 원문과 1차 자료를 확인해야 한다.
