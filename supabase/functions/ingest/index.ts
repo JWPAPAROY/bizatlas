@@ -13,20 +13,25 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
-const GEMINI_MODEL = 'gemini-flash-latest'
+
+// 무료 티어 한도는 **모델별 일일 요청 수**다 (quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier,
+// gemini-3.6-flash 기준 하루 20회). 429 응답의 "retry in 39s" 문구 때문에 분당 한도로 착각하기 쉬운데,
+// 하루가 지나야 회복된다. 모델을 바꾸면 쿼터 버킷도 달라지므로, 주력 모델이 소진되면 다음 모델로 넘어간다.
+// 앞쪽일수록 품질이 좋다.
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest']
 
 // 엣지 함수 실행 시간 한도가 있으므로 한 번에 다 처리하지 않는다. 매일 돌면 충분히 쌓인다.
 // Gemini 호출이 건당 10~13초라 순차 처리하면 예산 안에 10건도 못 넘긴다 → 병렬 처리한다.
 // Supabase 엣지 함수는 응답이 없으면 150초에 끊는다(IDLE_TIMEOUT). 마지막 호출이 끝나고
 // DB 정리까지 마칠 시간이 필요하므로 신규 호출 시작은 95초에서 멈춘다.
-const MAX_AI_CALLS = 22
-const CONCURRENCY = 3
+// 일일 한도(모델당 20회) × 모델 수가 실질 상한이다. 하루 1회 cron 이므로 그 한 번에 다 쓴다.
+const MAX_AI_CALLS = 40
+const CONCURRENCY = 4
 const TIME_BUDGET_MS = 95_000
 
-// Gemini 무료 티어는 분당 20회에서 429(RESOURCE_EXHAUSTED)를 던진다.
-// bizatlas 전용 키를 쓰므로 다른 서비스와 쿼터를 나누지 않지만, 직전 실행의 잔여 카운트와
-// 겹칠 수 있으니 한도에 바짝 붙이지 않는다. 실패는 다음 실행으로 이월되므로 성공률이 우선이다.
-const RPM_LIMIT = 14
+// 요청 수는 일일 한도라 분당 페이싱이 의미 없지만, 입력 토큰에는 분당 한도가 따로 있다
+// (GenerateContentInputTokensPerModelPerMinute-FreeTier). 그것만 피할 정도로 느슨하게 띄운다.
+const RPM_LIMIT = 30
 const CALL_SPACING_MS = Math.ceil(60_000 / RPM_LIMIT)
 
 // 원문이 이보다 짧으면 AI 를 태워도 "정보 부족"으로 반려된다. 호출 전에 잘라 비용을 아낀다.
@@ -154,10 +159,22 @@ function parseAtom(xml: string, limit: number): Candidate[] {
   }).filter((c) => c.title)
 }
 
-// RSS 2.0 (TechCrunch)
-function parseRss(xml: string, limit: number): Candidate[] {
+// 기사 페이지에서 본문만 뽑는다 (script/style 제거 후 <p> 텍스트).
+function extractArticle(html: string): string {
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  const paras = cleaned.match(/<p[^>]*>[\s\S]*?<\/p>/gi) ?? []
+  return paras
+    .map((p) => stripTags(p))
+    .filter((t) => t.length > 40)
+    .join('\n')
+}
+
+// RSS 2.0 (TechCrunch 등 뉴스)
+async function parseRss(xml: string, limit: number): Promise<Candidate[]> {
   const items = xml.match(/<item[\s\S]*?<\/item>/g) ?? []
-  return items.slice(0, limit).map((e) => {
+  const base = items.slice(0, limit).map((e) => {
     const link = pick(e, 'link')
     const guid = pick(e, 'guid') || link
     const body = stripTags(pick(e, 'content:encoded') || pick(e, 'description'))
@@ -165,10 +182,24 @@ function parseRss(xml: string, limit: number): Candidate[] {
       sourceItemId: `rss:${guid}`,
       title: stripTags(pick(e, 'title')),
       url: link,
-      // 기사 전문은 길어 토큰을 낭비한다. 앞부분만으로 판별에 충분.
-      text: body.slice(0, 2500),
+      text: body,
     }
   }).filter((c) => c.title)
+
+  // 뉴스 RSS 의 description 은 1~2문장 요약뿐이라 그대로 쓰면 "정보 부족"으로 반려된다.
+  // 기사 본문을 받아오면 투자유치 금액·라운드 같은 핵심 수치가 실제로 들어온다.
+  // AI 호출이 아니라 단순 HTTP 라 비용은 거의 없다.
+  await Promise.all(base.map(async (c) => {
+    if (!c.url || c.text.length > 1200) return
+    try {
+      const article = extractArticle(await fetchText(c.url))
+      if (article.length > c.text.length) c.text = article
+    } catch { /* 본문 실패 시 요약으로 진행 */ }
+  }))
+
+  // 기사 전문이 아주 길면 토큰 낭비 → 앞부분만. 금액·라운드는 보통 첫 문단들에 나온다.
+  for (const c of base) c.text = c.text.slice(0, 4000)
+  return base
 }
 
 // Hacker News (Algolia) — Show HN
@@ -201,7 +232,7 @@ async function loadCandidates(src: Record<string, unknown>): Promise<Candidate[]
     case 'yc_api':     return await parseYc(url, limit)
     case 'hn_algolia': return await parseHn(url, limit)
     case 'atom':       return parseAtom(await fetchText(url), limit)
-    case 'rss':        return parseRss(await fetchText(url), limit)
+    case 'rss':        return await parseRss(await fetchText(url), limit)
     default:           throw new Error(`unknown source kind: ${src.kind}`)
   }
 }
@@ -220,12 +251,22 @@ function buildPrompt(vocab: Vocab): string {
 ## 판별 기준 (가장 중요)
 원문이 "실재하는 회사 또는 제품의 비즈니스 모델"을 파악할 수 있는 내용이 아니면 is_business=false 로 반려하세요.
 반려 대상 예시: 일반 뉴스·논평·인사 이동·시장 전망 기사, 오픈소스 취미 프로젝트, 수익 구조를 전혀 알 수 없는 단순 툴 소개.
+**벤처캐피털의 펀드 결성 기사도 반려하세요** ("Index Ventures raises $2B across three funds" 류).
+VC 는 우리가 수집하는 비즈니스 모델이 아닙니다. 단, VC 가 특정 스타트업에 투자한 기사라면
+그 **투자받은 스타트업**을 대상으로 작성하세요.
 확실하지 않으면 반려하세요. 데이터 품질이 수집량보다 중요합니다.
 
 ## 작성 규칙
 - name, hq_country 를 제외한 모든 서술형 필드는 **한국어**로 작성합니다.
 - 원문에 없는 사실을 지어내지 마세요. 모르는 필드는 null 또는 빈 배열로 두세요.
-- 특히 traction(매출·사용자수·투자금)은 원문에 명시된 수치만 넣습니다. 추정 금지.
+- traction(매출·사용자수·투자유치·기업가치)은 **원문에 명시된 수치만** 넣습니다. 추정 금지.
+  단 명시돼 있으면 반드시 빠뜨리지 말고 채우세요. 기사에 자주 나오는 형태:
+  "raised $20 million Series A" → funding: "$20M 시리즈 A",
+  "valued at $1.5 billion" → valuation: "$1.5B",
+  "300,000 customers" → users: "고객 30만".
+  라운드 단계(시드/시리즈 A 등)와 투자사 이름이 있으면 funding 문자열에 함께 적으세요.
+  **funding 에는 반드시 금액이 들어가야 합니다.** 금액 없이 "YC S26 배치", "액셀러레이터 참여"
+  같은 값은 넣지 말고 null 로 두세요. 액셀러레이터 소속은 funding 이 아닙니다.
 - 아래 열거된 값 외의 값을 쓰지 마세요. 목록에 없으면 가장 가까운 값을 고르고, 없으면 생략합니다.
 
 ## 허용 값
@@ -294,6 +335,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 // 워커들이 공유하는 호출 슬롯. 각 워커는 자기 차례가 될 때까지 기다렸다 요청한다.
 let nextSlotAt = 0
+// 현재 사용 중인 모델. 429(일일 소진) 시 뒤 모델로 넘어가며, 모든 워커가 공유한다.
+let modelIndex = 0
 async function acquireSlot() {
   const now = Date.now()
   const slot = Math.max(now, nextSlotAt)
@@ -325,30 +368,35 @@ async function structureOne(
     generationConfig: { maxOutputTokens: 2048, temperature: 0.3, responseMimeType: 'application/json' },
   })
 
-  // 페이서가 있어도 다른 프로세스(investar)와 키를 공유하므로 429 는 날 수 있다 → 1회 재시도.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // 429 = 그 모델의 하루치가 끝났다는 뜻이다(대기해도 안 풀린다). 다음 모델로 넘어간다.
+  while (modelIndex < GEMINI_MODELS.length) {
+    const model = GEMINI_MODELS[modelIndex]
     await acquireSlot()
-    const res = await fetch(`${GEMINI_URL}/${GEMINI_MODEL}:generateContent`, {
+    const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
       body,
     })
 
     if (res.status === 429) {
-      // 백오프를 워커별로 재우면 나머지 워커가 그 사이 계속 쏴서 429 가 연쇄로 터진다.
-      // 슬롯 자체를 뒤로 밀어 모든 워커가 함께 기다리게 한다.
-      const wait = retryDelayMs(await res.text())
-      nextSlotAt = Math.max(nextSlotAt, Date.now() + wait)
-      if (attempt === 0 && wait <= 45_000) continue
-      throw new Error(`Gemini 429 (${Math.round(wait / 1000)}s 대기 필요 — 다음 실행으로 이월)`)
+      await res.text()
+      // 다른 워커가 이미 모델을 넘겼을 수 있으므로 현재 값과 비교해서만 올린다.
+      const exhausted = GEMINI_MODELS.indexOf(model)
+      if (exhausted === modelIndex) modelIndex++
+      if (modelIndex >= GEMINI_MODELS.length) {
+        throw new Error(`Gemini 일일 쿼터 소진 (모델 ${GEMINI_MODELS.length}개 전부) — 다음 실행으로 이월`)
+      }
+      continue
     }
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
+    if (!res.ok) throw new Error(`Gemini HTTP ${res.status} (${model})`)
 
     const data = await res.json()
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-    return extractJson(text)
+    const parsed = extractJson(text)
+    if (parsed) parsed.__model = model
+    return parsed
   }
-  throw new Error('Gemini 429 재시도 실패')
+  throw new Error('Gemini 일일 쿼터 소진')
 }
 
 // AI 가 어휘를 벗어난 값을 뱉으면 필터에서 걸러야 필터 UI 가 깨지지 않는다.
@@ -414,7 +462,7 @@ function sanitize(
     source_name: src.name,
     source_url: cand.url || null,
     source_item_id: cand.sourceItemId,
-    ai_model: GEMINI_MODEL,
+    ai_model: typeof parsed.__model === 'string' ? parsed.__model : GEMINI_MODELS[0],
     ai_confidence: (() => {
       const n = Number(parsed.ai_confidence)
       return Number.isFinite(n) && n >= 0 && n <= 1 ? Number(n.toFixed(2)) : null
@@ -564,7 +612,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         // 개별 항목 실패는 삼키고 계속 — seen_items 에 남기지 않아 다음 실행에서 재시도된다.
         const msg = e instanceof Error ? e.message : String(e)
-        if (msg.includes('429')) quotaHalted = true
+        if (msg.includes('쿼터 소진')) quotaHalted = true
         log.failed++; failed++
         if (errorSamples.length < 5) errorSamples.push(`[${src.name}] ${msg}`)
         console.error(`[${src.name}] ${cand.sourceItemId}:`, msg)

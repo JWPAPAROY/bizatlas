@@ -42,6 +42,24 @@ const ROWS = [
   },
   { key: 'pricing_note', label: '과금 방식', render: (b) => b.pricing_note ?? '—' },
   {
+    key: 'traction',
+    label: '공개 지표',
+    render: (b) => {
+      const t = Object.entries(b.traction ?? {}).filter(([, v]) => v != null && v !== '')
+      if (!t.length) return '—'
+      const LABEL = { revenue: '매출', users: '사용자', funding: '투자유치', valuation: '기업가치' }
+      return (
+        <ul className="space-y-0.5">
+          {t.map(([k, v]) => (
+            <li key={k}>
+              <span className="text-ink-400">{LABEL[k] ?? k}</span> {String(v)}
+            </li>
+          ))}
+        </ul>
+      )
+    },
+  },
+  {
     key: 'capital_intensity',
     label: AXES.capital_intensity.label,
     render: (b) => <Scale value={b.capital_intensity} tone="warn" compact />,

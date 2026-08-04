@@ -58,6 +58,12 @@ export default function BusinessCard({ biz }) {
         )}
       </div>
 
+      {biz.traction?.funding && (
+        <p className="mt-2 truncate text-xs font-medium text-emerald-700" title={biz.traction.funding}>
+          투자유치 {biz.traction.funding}
+        </p>
+      )}
+
       <div className="mt-3 flex items-center justify-between border-t border-ink-100 pt-2.5">
         <span className="text-xs text-ink-400">한국 적용성</span>
         <Scale value={biz.korea_fit} tone="good" compact />
