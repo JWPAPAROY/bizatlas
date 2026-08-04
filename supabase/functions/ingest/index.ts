@@ -18,7 +18,18 @@ const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 // gemini-3.6-flash 기준 하루 20회). 429 응답의 "retry in 39s" 문구 때문에 분당 한도로 착각하기 쉬운데,
 // 하루가 지나야 회복된다. 모델을 바꾸면 쿼터 버킷도 달라지므로, 주력 모델이 소진되면 다음 모델로 넘어간다.
 // 앞쪽일수록 품질이 좋다.
-const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest']
+// 별칭은 실제 모델과 쿼터를 공유하므로(gemini-flash-latest = gemini-3.6-flash) 버킷이 겹치지 않게 고른다.
+// 품질 좋은 순. 실제 요청 형태(system_instruction + JSON 모드)로 검증한 것만 넣었다:
+//   - gemini-3.5-flash  : 깨진 JSON 을 뱉어 제외
+//   - gemma-4-*         : system_instruction/JSON 모드를 무시해 제외
+const GEMINI_MODELS = [
+  'gemini-flash-latest',      // 버킷 gemini-3.6-flash
+  'gemini-3-flash-preview',   // 버킷 gemini-3-flash-preview
+  'gemini-flash-lite-latest', // 버킷 gemini-3.5-flash-lite
+  'gemini-3.1-flash-lite',    // 버킷 gemini-3.1-flash-lite
+  'gemini-2.0-flash',         // 버킷 gemini-2.0-flash
+  'gemini-2.0-flash-lite',    // 버킷 gemini-2.0-flash-lite
+]
 
 // 엣지 함수 실행 시간 한도가 있으므로 한 번에 다 처리하지 않는다. 매일 돌면 충분히 쌓인다.
 // Gemini 호출이 건당 10~13초라 순차 처리하면 예산 안에 10건도 못 넘긴다 → 병렬 처리한다.
@@ -582,11 +593,15 @@ Deno.serve(async (req) => {
         aiCalls++
         const parsed = await structureOne(geminiKey, systemPrompt, cand)
 
-        if (!parsed || parsed.is_business !== true) {
+        // 파싱 실패는 모델이 잘못 뱉은 것이지 항목의 문제가 아니다. 반려로 기록하면
+        // seen_items 에 남아 영원히 재시도되지 않으므로, 에러로 올려 다음 실행에 넘긴다.
+        if (!parsed) throw new Error('JSON 파싱 실패 — 다음 실행에서 재시도')
+
+        if (parsed.is_business !== true) {
           await supabase.from('seen_items').insert({
             source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
             verdict: 'rejected',
-            reason: String(parsed?.reject_reason ?? 'is_business=false 또는 JSON 파싱 실패').slice(0, 300),
+            reason: String(parsed.reject_reason ?? 'is_business=false').slice(0, 300),
           })
           log.skipped++; skipped++
           continue

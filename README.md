@@ -25,7 +25,7 @@
 - **프론트엔드** — Vite + React 19 + Tailwind v4, GitHub Pages 배포 (HashRouter)
 - **DB** — Supabase Postgres (프로젝트 `skalhldjvspoaacdxgjg`, 서울 리전)
 - **수집** — Supabase Edge Function (`ingest`) + Gemini
-- **스케줄** — Supabase 내부 `pg_cron` + `pg_net` 이 매일 07:00 KST 에 수집 함수를 호출한다.
+- **스케줄** — Supabase 내부 `pg_cron` + `pg_net` 이 **4시간마다**(KST 01/05/09/13/17/21시) 수집 함수를 호출한다.
   외부 스케줄러(GitHub Actions)를 쓰지 않아 의존성이 하나 적고, 시크릿 사본도 GitHub 에 둘 필요가 없다.
 
 라이브: https://jwpaparoy.github.io/bizatlas/
@@ -47,11 +47,16 @@
 
 설계상 지켜야 하는 제약:
 
-- **Gemini 무료 티어는 분당 20회.** 초과하면 429 가 연쇄로 터진다. `RPM_LIMIT`(기본 8)로 호출
-  시작 간격을 강제하고, 429 시 워커별이 아니라 **전역 슬롯**을 뒤로 민다.
+- **Gemini 무료 티어 한도는 "모델별 하루 20회"다** (quotaId `GenerateRequestsPerDayPerProjectPerModel-FreeTier`).
+  429 의 `Please retry in 39s` 문구 때문에 분당 한도로 착각하기 쉬운데 하루가 지나야 회복된다.
+  모델마다 쿼터 버킷이 다르므로 `GEMINI_MODELS` 폴백 체인으로 용량을 늘린다 (6개 × 20 ≈ 하루 120건).
+  **별칭은 실제 모델과 버킷을 공유한다** — `gemini-flash-latest` = `gemini-3.6-flash`. 둘 다 넣어도 소용없다.
+  체인에서 뺀 것: `gemini-3.5-flash`(깨진 JSON 생성), `gemma-4-*`(system_instruction·JSON 모드 무시).
 - **Supabase 엣지 함수는 150초 idle timeout.** 새 호출 시작은 `TIME_BUDGET_MS`(95초)에서 멈춘다.
 - **한 번 판정한 항목은 `seen_items` 에 남겨 다시 AI 에 태우지 않는다.** 반려된 것도 남긴다.
   실패(에러)한 것만 남기지 않아 다음 실행에서 재시도된다.
+  **JSON 파싱 실패는 반려가 아니라 에러로 처리한다** — 모델이 잘못 뱉은 것이지 항목의 문제가 아니라서,
+  반려로 기록하면 멀쩡한 항목이 영구히 버려진다.
 
 ## 로컬 실행
 
