@@ -23,6 +23,8 @@ const GEMINI_MODELS = [
   'gemini-2.0-flash-lite',
 ]
 
+const DART_API = 'https://opendart.fss.or.kr/api'
+
 const WD_API = 'https://www.wikidata.org/w/api.php'
 const WD_ENTITY = 'https://www.wikidata.org/wiki/Special:EntityData'
 const UA = 'BizAtlas/0.1 (+https://github.com/JWPAPAROY/bizatlas)'
@@ -173,8 +175,12 @@ function formatMoney(amount: number, currency: string): string {
   return currency ? `${currency} ${scaled}` : `${scaled} (통화 미상)`
 }
 
+// 검증 사실. 출처가 위키데이터든 DART 든 downstream 은 같은 모양만 본다.
 type WdEntity = {
   id: string
+  source: 'wikidata' | 'dart'
+  url: string
+  listed?: boolean
   labelKo?: string
   labelEn?: string
   inception: string | null
@@ -198,6 +204,8 @@ async function wdEntity(id: string): Promise<WdEntity | null> {
   if (!isBusiness) return null
   return {
     id,
+    source: 'wikidata',
+    url: `https://www.wikidata.org/wiki/${id}`,
     labelKo: e.labels?.ko?.value,
     labelEn: e.labels?.en?.value,
     inception: claimValue(claims, 'P571') as string | null,
@@ -242,6 +250,79 @@ async function resolveCompany(names: string[]): Promise<WdEntity | null> {
   return null
 }
 
+// SQL 의 canonical_name() 과 같은 규칙으로 정규화한다. dart_corps.canonical 과 맞춰야 조회된다.
+function normalizeName(txt: string): string {
+  return txt
+    .toLowerCase()
+    .trim()
+    .replace(/\s*(,)?\s*(inc\.?|llc|ltd\.?|corp\.?|corporation|co\.?|gmbh|s\.a\.|plc|주식회사|㈜)\s*$/g, '')
+    .replace(/[^a-z0-9가-힣]/g, '')
+}
+
+// DART 는 고유번호(corp_code) 기반이라 이름 전문검색 오탐이 없다.
+// 한국 기업은 Wikidata 가 비어 있어(배달의민족·무신사는 엔티티 자체 없음) 이쪽으로 검증한다.
+// deno-lint-ignore no-explicit-any
+async function resolveKorean(supabase: any, dartKey: string, names: string[]): Promise<WdEntity | null> {
+  const keys = [...new Set(names.map((n) => normalizeName(n ?? '')).filter(Boolean))]
+  if (!keys.length) return null
+
+  const { data: matches } = await supabase
+    .from('dart_corps').select('corp_code, corp_name, stock_code').in('canonical', keys)
+  if (!matches?.length) return null
+
+  // 동명 법인이 있으면 상장사를 우선한다 (재무제표 API 를 쓸 수 있고 실체가 더 분명하다)
+  const corp = matches.find((m: Record<string, unknown>) => m.stock_code) ?? matches[0]
+
+  // 회사개황: 설립일(est_dt)은 상장·비상장 모두 제공된다
+  const cRes = await fetch(`${DART_API}/company.json?crtfc_key=${dartKey}&corp_code=${corp.corp_code}`)
+  if (!cRes.ok) return null
+  const c = await cRes.json()
+  if (c?.status !== '000') return null
+
+  const est = String(c.est_dt ?? '')
+  const inception = est.length === 8 ? `${est.slice(0, 4)}-${est.slice(4, 6)}-${est.slice(6, 8)}` : null
+
+  // 매출: 상장사만 재무제표 API 가 열려 있다. 비상장은 감사보고서 원문이라 여기서 다루지 않는다.
+  let revenue: number | null = null
+  let revenueYear: number | null = null
+  if (corp.stock_code) {
+    const thisYear = new Date().getFullYear()
+    for (const y of [thisYear - 1, thisYear - 2]) {
+      const fRes = await fetch(
+        `${DART_API}/fnlttSinglAcnt.json?crtfc_key=${dartKey}&corp_code=${corp.corp_code}` +
+        `&bsns_year=${y}&reprt_code=11011`,
+      )
+      if (!fRes.ok) continue
+      const f = await fRes.json()
+      if (f?.status !== '000') continue
+      // deno-lint-ignore no-explicit-any
+      const sales = (f.list ?? []).find((r: any) =>
+        String(r.account_nm ?? '').replace(/\s/g, '') === '매출액' && r.fs_div === 'CFS')
+        // deno-lint-ignore no-explicit-any
+        ?? (f.list ?? []).find((r: any) => String(r.account_nm ?? '').replace(/\s/g, '') === '매출액')
+      const amount = Number(String(sales?.thstrm_amount ?? '').replace(/,/g, ''))
+      if (Number.isFinite(amount) && amount > 0) { revenue = amount; revenueYear = y; break }
+    }
+  }
+
+  return {
+    id: String(corp.corp_code),
+    source: 'dart',
+    url: `https://dart.fss.or.kr/dsab001/main.do?corpCode=${corp.corp_code}`,
+    listed: !!corp.stock_code,
+    labelKo: String(corp.corp_name),
+    labelEn: undefined,
+    inception,
+    employees: null,
+    website: c.hm_url ? String(c.hm_url) : null,
+    revenue,
+    revenueYear,
+    revenueCurrency: revenue ? 'KRW' : '',
+    sitelinks: 0,
+    country: 'Q884',
+  }
+}
+
 type Gate = { pass: boolean; ageYears: number | null; scale: string | null; reasons: string[] }
 
 function judge(e: WdEntity): Gate {
@@ -256,6 +337,11 @@ function judge(e: WdEntity): Gate {
   if (e.revenue) scale = `매출 ${formatMoney(e.revenue, e.revenueCurrency)} (${e.revenueYear ?? '연도미상'})`
   else if (e.employees) scale = `직원 ${e.employees.toLocaleString()}명`
   else if (e.sitelinks >= MIN_SITELINKS) scale = `위키백과 ${e.sitelinks}개 언어판`
+  else if (e.source === 'dart') {
+    // DART 등록 자체가 규모 근거다. 비상장이라도 외부감사 대상(자산 120억 등)이라야 공시 의무가 생긴다.
+    // 상장사인데 매출을 못 가져온 경우도 실체는 확인된 것이므로 통과시킨다.
+    scale = e.listed ? '상장법인 (DART 공시)' : '외부감사 대상 법인 (DART 공시)'
+  }
   if (!scale) reasons.push('규모·저명성 확인 불가')
 
   return { pass: reasons.length === 0, ageYears, scale, reasons }
@@ -361,6 +447,13 @@ Deno.serve(async (req) => {
   let body: Record<string, unknown> = {}
   try { body = await req.json() } catch { /* 기본값 사용 */ }
 
+  // 한국 기업은 Wikidata 커버리지가 사실상 없어 DART 로 검증한다.
+  const isKorea = body.region === 'korea'
+  const dartKey = Deno.env.get('DART_API_KEY') ?? ''
+  if (isKorea && !dartKey) {
+    return json(400, { error: 'region=korea 는 DART_API_KEY 시크릿이 필요합니다.' })
+  }
+
   const { data: vocabRows } = await supabase.from('taxonomy').select('kind, value, label_ko')
   const vocab: Record<string, { value: string; label_ko: string }[]> = {}
   for (const r of vocabRows ?? []) (vocab[r.kind] ??= []).push({ value: r.value, label_ko: r.label_ko })
@@ -384,8 +477,13 @@ Deno.serve(async (req) => {
 
   try {
     // ── 1) 후보 명단
+    // DART 는 서비스명이 아니라 법인명으로 등록돼 있다(배달의민족 → 우아한형제들).
     const koreaBias = body.region === 'korea'
-      ? '\n\n**이번에는 반드시 한국 회사만 추천하세요.**'
+      ? '\n\n**이번에는 반드시 한국 회사만 추천하세요.**' +
+        '\n또한 각 항목에 corp_name_kr 을 추가하세요: 전자공시(DART)에 등록된 **법인 정식명칭**입니다.' +
+        ' 서비스명과 법인명이 다르면 반드시 법인명을 쓰세요' +
+        ' (예: 배달의민족 → 우아한형제들, 토스 → 비바리퍼블리카, 쿠팡플레이 → 쿠팡).' +
+        ' 모르면 name 과 같게 두세요.'
       : ''
     // 응답이 토큰 상한에서 잘리면 JSON 이 깨져 후보가 0건이 된다. 넉넉히 준다.
     const candidateRes = await gemini(
@@ -404,11 +502,21 @@ Deno.serve(async (req) => {
     await Promise.all(companies.slice(0, count).map(async (c: Record<string, unknown>) => {
       const name = String(c?.name ?? '').trim()
       const nameEn = String(c?.name_en ?? '').trim()
+      const corpKr = String(c?.corp_name_kr ?? '').trim()
       if (!name && !nameEn) return
       try {
-        // 영문 표제어를 먼저 시도한다 (한국어 음차보다 위키데이터 적중률이 훨씬 높다)
-        const e = await resolveCompany([nameEn, name])
-        if (!e) { rejected.push(`${name}: 위키데이터에 기업 엔티티 없음`); return }
+        // 한국 기업은 위키데이터가 비어 있어(배달의민족·무신사는 엔티티 자체 없음) DART 로 검증한다.
+        // 법인명(corp_name_kr)을 먼저 시도한다 — DART 는 서비스명이 아니라 법인명으로 등록돼 있다.
+        const e = isKorea
+          ? await resolveKorean(supabase, dartKey, [corpKr, name])
+          // 영문 표제어를 먼저 시도한다 (한국어 음차보다 위키데이터 적중률이 훨씬 높다)
+          : await resolveCompany([nameEn, name])
+        if (!e) {
+          rejected.push(isKorea
+            ? `${name}: DART 에 법인 없음 (법인명 추정: ${corpKr || name})`
+            : `${name}: 위키데이터에 기업 엔티티 없음`)
+          return
+        }
         log.resolved++
         const gate = judge(e)
         if (!gate.pass) { rejected.push(`${name}: ${gate.reasons.join(', ')}`); return }
@@ -495,9 +603,10 @@ Deno.serve(async (req) => {
             traction,
             tier: 'proven',
             evidence: {
-              source: 'wikidata',
+              source: e.source,
               entity: e.id,
-              url: `https://www.wikidata.org/wiki/${e.id}`,
+              url: e.url,
+              listed: e.listed ?? null,
               inception: e.inception,
               age_years: gate.ageYears,
               scale: gate.scale,
@@ -507,8 +616,8 @@ Deno.serve(async (req) => {
               employees: e.employees,
               sitelinks: e.sitelinks,
             },
-            source_name: 'Wikidata 검증',
-            source_url: `https://www.wikidata.org/wiki/${e.id}`,
+            source_name: e.source === 'dart' ? 'DART 전자공시 검증' : 'Wikidata 검증',
+            source_url: e.url,
             source_item_id: `seed:${e.id}`,
             ai_model: typeof p.__model === 'string' ? p.__model : GEMINI_MODELS[0],
             ai_confidence: (() => {
