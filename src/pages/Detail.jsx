@@ -16,7 +16,7 @@ function Section({ title, children }) {
 
 export default function Detail() {
   const { slug } = useParams()
-  const { labelOf, compare, toggleCompare, MAX_COMPARE } = useStore()
+  const { labelOf, descOf, compare, toggleCompare, MAX_COMPARE } = useStore()
   const [biz, setBiz] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -140,35 +140,48 @@ export default function Detail() {
       )}
 
       <Section title="수익 구조">
-        <div className="flex flex-wrap gap-1.5">
-          {biz.revenue_models?.length ? (
-            biz.revenue_models.map((m) => (
-              <span key={m} className="rounded-md bg-brand-50 px-2 py-1 text-sm font-medium text-brand-700">
-                {labelOf('revenue_model', m)}
-              </span>
-            ))
-          ) : (
-            <span className="text-sm text-ink-400">분류되지 않음</span>
-          )}
-        </div>
+        <p className="mb-2 text-xs text-ink-400">이 회사가 돈을 버는 방식입니다.</p>
+        {biz.revenue_models?.length ? (
+          <ul className="space-y-1.5">
+            {biz.revenue_models.map((m) => (
+              <li key={m} className="flex flex-wrap items-baseline gap-x-2">
+                <span className="rounded-md bg-brand-50 px-2 py-0.5 text-sm font-medium text-brand-700">
+                  {labelOf('revenue_model', m)}
+                </span>
+                <span className="text-xs text-ink-500">{descOf('revenue_model', m)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-sm text-ink-400">분류되지 않음</span>
+        )}
         {biz.pricing_note && <p className="mt-2 text-sm text-ink-600">{biz.pricing_note}</p>}
       </Section>
 
       <Section title="해자">
-        <div className="flex flex-wrap gap-1.5">
-          {biz.moats?.length ? (
-            biz.moats.map((m) => (
-              <span key={m} className="rounded-md bg-ink-100 px-2 py-1 text-sm font-medium text-ink-700">
-                {labelOf('moat', m)}
-              </span>
-            ))
-          ) : (
-            <span className="text-sm text-ink-400">분류되지 않음</span>
-          )}
-        </div>
+        <p className="mb-2 text-xs text-ink-400">
+          경쟁자가 쉽게 따라오지 못하게 막아주는 요소입니다. 없으면 실행력으로만 버티는 구조입니다.
+        </p>
+        {biz.moats?.length ? (
+          <ul className="space-y-1.5">
+            {biz.moats.map((m) => (
+              <li key={m} className="flex flex-wrap items-baseline gap-x-2">
+                <span className="rounded-md bg-ink-100 px-2 py-0.5 text-sm font-medium text-ink-700">
+                  {labelOf('moat', m)}
+                </span>
+                <span className="text-xs text-ink-500">{descOf('moat', m)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-sm text-ink-400">분류되지 않음</span>
+        )}
       </Section>
 
       <Section title="구조 지표">
+        <p className="mb-1 text-xs text-ink-400">
+          세 축 모두 1~5 정수이며 <strong>AI 가 매긴 해석</strong>입니다. 재무 데이터를 계산한 값이 아닙니다.
+        </p>
         <div className="divide-y divide-ink-100">
           <AxisRow axis="capital_intensity" value={biz.capital_intensity} />
           <AxisRow axis="replicability" value={biz.replicability} />

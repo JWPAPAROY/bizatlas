@@ -59,21 +59,19 @@ const ROWS = [
       )
     },
   },
-  {
-    key: 'capital_intensity',
-    label: AXES.capital_intensity.label,
-    render: (b) => <Scale value={b.capital_intensity} tone="warn" compact />,
-  },
-  {
-    key: 'replicability',
-    label: AXES.replicability.label,
-    render: (b) => <Scale value={b.replicability} tone="warn" compact />,
-  },
-  {
-    key: 'korea_fit',
-    label: AXES.korea_fit.label,
-    render: (b) => <Scale value={b.korea_fit} tone="good" compact />,
-  },
+  // 점수만 나란히 놓으면 3점이 무슨 뜻인지 알 수 없다 → 단계 설명을 함께 쓴다
+  ...['capital_intensity', 'replicability', 'korea_fit'].map((axis) => ({
+    key: axis,
+    label: AXES[axis].label,
+    render: (b) => (
+      <div>
+        <Scale value={b[axis]} tone={AXES[axis].tone} compact />
+        {b[axis] != null && (
+          <p className="mt-1 text-xs text-ink-500">{AXES[axis].levels[b[axis]]}</p>
+        )}
+      </div>
+    ),
+  })),
   { key: 'korea_note', label: '한국 적용성 근거', render: (b) => b.korea_note ?? '—' },
   { key: 'why_it_works', label: '왜 작동하는가', render: (b) => b.why_it_works ?? '—' },
   {

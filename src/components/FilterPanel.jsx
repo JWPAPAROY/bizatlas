@@ -1,11 +1,13 @@
 import { X } from 'lucide-react'
 import { useStore } from '../lib/store.jsx'
+import { AXES } from './Scale.jsx'
 
-function Chip({ active, onClick, children }) {
+function Chip({ active, onClick, title, children }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
         active
           ? 'border-brand-600 bg-brand-600 text-white'
@@ -60,6 +62,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
               key={t.value}
               active={filters.revenue_models.includes(t.value)}
               onClick={() => toggleMulti('revenue_models', t.value)}
+              title={t.description}
             >
               {t.label_ko}
             </Chip>
@@ -74,6 +77,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
               key={t.value}
               active={filters.customer_type === t.value}
               onClick={() => setOne('customer_type', t.value)}
+              title={t.description}
             >
               {t.label_ko}
             </Chip>
@@ -88,6 +92,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
               key={t.value}
               active={filters.category === t.value}
               onClick={() => setOne('category', t.value)}
+              title={t.description}
             >
               {t.label_ko}
             </Chip>
@@ -102,6 +107,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
               key={t.value}
               active={filters.moats.includes(t.value)}
               onClick={() => toggleMulti('moats', t.value)}
+              title={t.description}
             >
               {t.label_ko}
             </Chip>
@@ -110,6 +116,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
       </Group>
 
       <Group title="한국 적용성 최소">
+        <p className="mb-1 text-xs text-ink-400">{AXES.korea_fit.hint}</p>
         <input
           type="range"
           min="1"
@@ -124,6 +131,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
       </Group>
 
       <Group title="자본 집약도 최대">
+        <p className="mb-1 text-xs text-ink-400">{AXES.capital_intensity.hint}</p>
         <input
           type="range"
           min="1"

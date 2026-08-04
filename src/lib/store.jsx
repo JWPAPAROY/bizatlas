@@ -48,9 +48,15 @@ export function StoreProvider({ children }) {
     [taxonomy],
   )
 
+  // 태그가 무슨 뜻인지 화면에서 설명하기 위한 것. 모든 통제 어휘에 설명이 채워져 있다.
+  const descOf = useCallback(
+    (kind, value) => taxonomy[kind]?.find((t) => t.value === value)?.description ?? '',
+    [taxonomy],
+  )
+
   const value = useMemo(
-    () => ({ taxonomy, labelOf, loading, compare, toggleCompare, clearCompare, MAX_COMPARE }),
-    [taxonomy, labelOf, loading, compare, toggleCompare, clearCompare],
+    () => ({ taxonomy, labelOf, descOf, loading, compare, toggleCompare, clearCompare, MAX_COMPARE }),
+    [taxonomy, labelOf, descOf, loading, compare, toggleCompare, clearCompare],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

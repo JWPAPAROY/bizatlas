@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { supabase, isConfigured } from '../lib/supabase'
-import { AXES } from '../components/Scale.jsx'
+import { AXES, AxisLegend } from '../components/Scale.jsx'
+import { useStore } from '../lib/store.jsx'
 
 export default function About() {
+  const { taxonomy } = useStore()
   const [sources, setSources] = useState([])
   const [lastRun, setLastRun] = useState(null)
 
@@ -28,21 +30,41 @@ export default function About() {
       </p>
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold">분해하는 축</h2>
-        <dl className="mt-3 space-y-3">
-          {Object.values(AXES).map((a) => (
-            <div key={a.label} className="rounded-lg border border-ink-200 bg-white p-3">
-              <dt className="text-sm font-semibold">{a.label}</dt>
-              <dd className="mt-0.5 text-sm text-ink-600">{a.hint}</dd>
-            </div>
-          ))}
-          <div className="rounded-lg border border-ink-200 bg-white p-3">
-            <dt className="text-sm font-semibold">수익 모델 · 해자 · 고객 유형 · 산업</dt>
-            <dd className="mt-0.5 text-sm text-ink-600">
-              자유 서술이 아니라 고정된 어휘로 태깅합니다. 그래야 필터와 비교가 성립합니다.
-            </dd>
+        <h2 className="text-lg font-semibold">1~5 점수 축</h2>
+        <p className="mt-1 text-sm text-ink-600">
+          세 축 모두 <strong>AI 가 매긴 해석</strong>입니다. 재무 데이터를 계산한 값이 아니며,
+          각 점수가 정확히 무엇을 뜻하는지는 아래 표 그대로입니다.
+        </p>
+        <div className="mt-3 space-y-3">
+          {Object.keys(AXES).map((key) => <AxisLegend key={key} axis={key} />)}
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold">태그 용어집</h2>
+        <p className="mt-1 text-sm text-ink-600">
+          자유 서술이 아니라 고정된 어휘로 태깅합니다. 그래야 필터와 비교가 성립합니다.
+          아래가 쓰이는 값 전부입니다.
+        </p>
+        {[
+          ['revenue_model', '수익 모델', '이 회사가 돈을 버는 방식. 한 회사에 여러 개가 붙을 수 있습니다.'],
+          ['moat', '해자', '경쟁자가 쉽게 따라오지 못하게 막아주는 요소. 최대 2개까지만 인정합니다.'],
+          ['customer_type', '고객 유형', '누구에게 파는가.'],
+          ['category', '산업', '어느 분야인가.'],
+        ].map(([kind, title, note]) => (
+          <div key={kind} className="mt-4">
+            <h3 className="text-sm font-semibold">{title}</h3>
+            <p className="mt-0.5 text-xs text-ink-500">{note}</p>
+            <dl className="mt-2 divide-y divide-ink-100 rounded-lg border border-ink-200 bg-white">
+              {(taxonomy[kind] ?? []).map((t) => (
+                <div key={t.value} className="flex flex-wrap items-baseline gap-x-2 px-3 py-2">
+                  <dt className="text-sm font-medium text-ink-800">{t.label_ko}</dt>
+                  <dd className="text-xs text-ink-500">{t.description}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
-        </dl>
+        ))}
       </section>
 
       <section className="mt-8">
