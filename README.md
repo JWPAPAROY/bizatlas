@@ -24,7 +24,11 @@
 
 - **프론트엔드** — Vite + React 19 + Tailwind v4, GitHub Pages 배포 (HashRouter)
 - **DB** — Supabase Postgres (프로젝트 `skalhldjvspoaacdxgjg`, 서울 리전)
-- **수집** — Supabase Edge Function (`ingest`) + Gemini, GitHub Actions 로 매일 07:00 KST 트리거
+- **수집** — Supabase Edge Function (`ingest`) + Gemini
+- **스케줄** — Supabase 내부 `pg_cron` + `pg_net` 이 매일 07:00 KST 에 수집 함수를 호출한다.
+  외부 스케줄러(GitHub Actions)를 쓰지 않아 의존성이 하나 적고, 시크릿 사본도 GitHub 에 둘 필요가 없다.
+
+라이브: https://jwpaparoy.github.io/bizatlas/
 
 ## 수집 파이프라인
 
@@ -59,17 +63,26 @@ npm run dev
 
 ## 배포
 
-`main` 에 푸시하면 GitHub Actions 가 Pages 로 배포한다.
+```powershell
+.\deploy.ps1    # 빌드 → gh-pages 브랜치 푸시 → Pages 반영
+```
 
-필요한 repo secret:
+GitHub Pages 는 `gh-pages` 브랜치를 소스로 쓴다.
 
-| 이름 | 용도 |
-|---|---|
-| `VITE_SUPABASE_URL` | 프론트 빌드 |
-| `VITE_SUPABASE_ANON_KEY` | 프론트 빌드 (공개돼도 되는 값 — RLS 로 읽기 전용 보장) |
-| `INGEST_SECRET` | 수집 함수 호출 인증 |
+> **push-to-deploy 로 전환하려면**: 현재 gh 토큰에 `workflow` 스코프가 없어 워크플로 파일을
+> 푸시할 수 없다. `gh auth refresh -h github.com -s workflow` 를 한 번 실행한 뒤
+> `.gitignore` 에서 `.github/workflows/` 줄을 지우고 `.github/workflows/deploy.yml` 을 커밋하면,
+> `main` 푸시마다 Actions 가 자동 배포한다. 그때 Pages 소스를 "GitHub Actions" 로 바꿔야 한다.
+> 필요한 repo secret 은 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (이미 등록돼 있음).
 
-Supabase 엣지 함수 secret (`supabase secrets set`):
+이 repo 는 자격증명이 로컬 설정으로 `JWPAPAROY` 에 고정돼 있다 (다른 프로젝트는 `knwwhr` 사용).
+
+```bash
+git config --local credential.helper ""
+git config --local --add credential.helper "!gh auth git-credential"
+```
+
+Supabase 엣지 함수 secret:
 
 | 이름 | 용도 |
 |---|---|
