@@ -308,7 +308,9 @@ async function resolveKorean(supabase: any, dartKey: string, names: string[]): P
   return {
     id: String(corp.corp_code),
     source: 'dart',
-    url: `https://dart.fss.or.kr/dsab001/main.do?corpCode=${corp.corp_code}`,
+    // 기업개황 팝업. 설립일 등 검증에 쓴 값이 그대로 보인다.
+    // dsab001/main.do?corpCode= 는 파라미터를 무시하고 빈 검색 폼만 띄우므로 쓰면 안 된다.
+    url: `https://dart.fss.or.kr/dsae001/selectPopup.ax?selectKey=${corp.corp_code}`,
     listed: !!corp.stock_code,
     labelKo: String(corp.corp_name),
     labelEn: undefined,

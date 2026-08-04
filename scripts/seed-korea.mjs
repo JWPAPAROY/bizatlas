@@ -113,6 +113,10 @@ function normalizeName(txt) {
     .replace(/[^a-z0-9가-힣]/g, '')
 }
 
+// 기업개황 팝업. 회사명·대표자·업종·**설립일**이 그대로 나와 검증 근거 링크로 적합하다.
+// dsab001/main.do?corpCode= 는 corpCode 파라미터를 무시하고 빈 검색 폼만 띄운다 — 쓰면 안 된다.
+const dartCorpUrl = (code) => `https://dart.fss.or.kr/dsae001/selectPopup.ax?selectKey=${code}`
+
 // 자산유동화 특수목적법인(제일차·제이차·유동화전문 등)은 이름만 같을 뿐 사업 실체가 아니다.
 const SPC_PATTERN = /(제[일이삼사오육칠팔구십]+차|유동화|전문유한|기업구조조정|리츠|사모|투자조합)/
 
@@ -362,7 +366,7 @@ async function main() {
           evidence: {
             source: 'dart',
             entity: e.corpCode,
-            url: `https://dart.fss.or.kr/dsab001/main.do?corpCode=${e.corpCode}`,
+            url: dartCorpUrl(e.corpCode),
             corp_name: e.corpName,
             listed: e.listed,
             inception: e.inception,
@@ -372,7 +376,7 @@ async function main() {
             revenue_year: e.revenueYear,
           },
           source_name: 'DART 전자공시 검증',
-          source_url: `https://dart.fss.or.kr/dsab001/main.do?corpCode=${e.corpCode}`,
+          source_url: dartCorpUrl(e.corpCode),
           source_item_id: `seed:dart:${e.corpCode}`,
           ai_model: p.__model ?? MODELS[0],
           ai_confidence: Number.isFinite(Number(p.ai_confidence)) ? Number(Number(p.ai_confidence).toFixed(2)) : null,
