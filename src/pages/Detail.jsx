@@ -100,6 +100,39 @@ export default function Detail() {
         )}
       </header>
 
+      {/* 검증 근거는 해석보다 앞에 둔다. 사실을 먼저 보이고 AI 가 매긴 값을 뒤에 두는 것이
+          이 서비스의 전제라, 순서 자체가 그 구분을 말해준다. */}
+      {biz.tier === 'proven' && biz.evidence?.source && (
+        <Section title="검증 근거">
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[
+              ['업력', biz.evidence.age_years != null ? `${biz.evidence.age_years}년` : null],
+              ['설립', biz.evidence.inception],
+              ['규모', biz.evidence.scale],
+              ['직원', biz.evidence.employees ? `${Number(biz.evidence.employees).toLocaleString()}명` : null],
+              ['법인명', biz.evidence.corp_name],
+            ].filter(([, v]) => v).map(([k, v]) => (
+              <div key={k} className="rounded-lg border border-ink-200 p-2.5">
+                <dt className="text-xs text-ink-400">{k}</dt>
+                <dd className="mt-0.5 text-sm font-semibold">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-2 text-xs text-ink-400">
+            여기까지는 AI 가 아니라{' '}
+            <a
+              href={biz.evidence.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-700 hover:underline"
+            >
+              {biz.evidence.source === 'dart' ? 'DART 전자공시' : 'Wikidata'} {biz.evidence.entity}
+            </a>
+            에서 가져온 값입니다. 아래 분류와 1~5 점수는 AI 가 매긴 해석입니다.
+          </p>
+        </Section>
+      )}
+
       {biz.description && (
         <Section title="개요">
           <p className="text-sm leading-relaxed whitespace-pre-line text-ink-700">{biz.description}</p>
@@ -195,36 +228,6 @@ export default function Detail() {
         </Section>
       )}
 
-      {biz.tier === 'proven' && biz.evidence?.source && (
-        <Section title="검증 근거">
-          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {[
-              ['업력', biz.evidence.age_years != null ? `${biz.evidence.age_years}년` : null],
-              ['설립', biz.evidence.inception],
-              ['규모', biz.evidence.scale],
-              ['직원', biz.evidence.employees ? `${Number(biz.evidence.employees).toLocaleString()}명` : null],
-            ].filter(([, v]) => v).map(([k, v]) => (
-              <div key={k} className="rounded-lg border border-ink-200 p-2.5">
-                <dt className="text-xs text-ink-400">{k}</dt>
-                <dd className="mt-0.5 text-sm font-semibold">{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-2 text-xs text-ink-400">
-            설립일·매출·직원수는 AI 가 아니라{' '}
-            <a
-              href={biz.evidence.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand-700 hover:underline"
-            >
-              Wikidata {biz.evidence.entity}
-            </a>
-            에서 가져온 값입니다. 아래 분류·점수만 AI 가 매겼습니다.
-          </p>
-        </Section>
-      )}
-
       <Section title="출처">
         <p className="text-sm text-ink-600">
           {biz.source_name}
@@ -237,13 +240,17 @@ export default function Detail() {
                 rel="noopener noreferrer"
                 className="text-brand-700 hover:underline"
               >
-                원문 보기
+                {biz.tier === 'proven' ? '공시 원문 보기' : '원문 보기'}
               </a>
             </>
           )}
         </p>
         <p className="mt-2 text-xs text-ink-400">
-          이 페이지의 분류·점수는 {biz.ai_model ?? 'AI'}가 원문을 읽고 자동 생성했습니다
+          {/* proven 은 검증된 사실 위에 AI 해석을 얹은 것이고, emerging 은 소개 문구만 읽고 만든 것이라
+              신뢰도가 다르다. 같은 문구로 뭉뚱그리면 안 된다. */}
+          {biz.tier === 'proven'
+            ? `위 분류와 1~5 점수는 ${biz.ai_model ?? 'AI'}가 매긴 해석입니다`
+            : `이 페이지의 분류·점수는 ${biz.ai_model ?? 'AI'}가 소개 문구만 읽고 자동 생성했습니다`}
           {biz.ai_confidence != null && ` (확신도 ${biz.ai_confidence})`}. 투자·창업 판단의 근거로 쓰기 전에
           반드시 원문과 1차 자료를 확인하세요.
         </p>
