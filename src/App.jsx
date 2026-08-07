@@ -1,10 +1,11 @@
 import { HashRouter, Routes, Route, Link, NavLink } from 'react-router-dom'
-import { Map, GitCompare, Info } from 'lucide-react'
+import { Map, GitCompare, Info, Activity } from 'lucide-react'
 import { StoreProvider, useStore } from './lib/store.jsx'
 import Home from './pages/Home.jsx'
 import Detail from './pages/Detail.jsx'
 import Compare from './pages/Compare.jsx'
 import About from './pages/About.jsx'
+import Today from './pages/Today.jsx'
 
 // GitHub Pages 는 SPA 라우팅에 404 가 나므로 HashRouter 를 쓴다 (404.html 트릭 불필요).
 
@@ -27,6 +28,10 @@ function Header() {
         <nav className="flex items-center gap-1">
           <NavLink to="/" className={navCls} end>
             탐색
+          </NavLink>
+          <NavLink to="/today" className={navCls}>
+            <Activity size={15} />
+            오늘
           </NavLink>
           <NavLink to="/compare" className={navCls}>
             <GitCompare size={15} />
@@ -56,6 +61,7 @@ export default function App() {
           <main className="flex-1">
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route path="/today" element={<Today />} />
               <Route path="/b/:slug" element={<Detail />} />
               <Route path="/compare" element={<Compare />} />
               <Route path="/about" element={<About />} />

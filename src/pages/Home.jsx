@@ -3,6 +3,7 @@ import { Search, SlidersHorizontal, Loader2 } from 'lucide-react'
 import { supabase, isConfigured } from '../lib/supabase'
 import BusinessCard from '../components/BusinessCard.jsx'
 import FilterPanel from '../components/FilterPanel.jsx'
+import TodayStrip from '../components/TodayStrip.jsx'
 
 const PAGE_SIZE = 24
 
@@ -116,6 +117,8 @@ export default function Home() {
           어느 하나가 판단을 대신하지는 않습니다.
         </p>
       </section>
+
+      <TodayStrip />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-ink-200 bg-white p-0.5">

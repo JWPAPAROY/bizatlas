@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase, isConfigured } from '../lib/supabase'
 import { AXES, AxisLegend } from '../components/Scale.jsx'
 import { useStore } from '../lib/store.jsx'
@@ -125,6 +126,10 @@ export default function About() {
           <p className="mt-3 text-xs text-ink-400">
             마지막 수집: {new Date(lastRun.started_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} (KST)
             {' · '}신규 {lastRun.created}건 / 검토 {lastRun.fetched}건
+            {' · '}
+            <Link to="/today" className="text-brand-700 hover:underline">
+              오늘 수집 현황
+            </Link>
           </p>
         )}
       </section>
