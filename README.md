@@ -141,7 +141,8 @@ node scripts/seed-korea.mjs fintech 8
 | `seed-korea.mjs [분야] [개수]` | 한국 검증 코퍼스 시드 | 코퍼스를 늘릴 때 (`DART_API_KEY` 필요) |
 | `rescore.mjs [건수]` | 1~5 척도 재평가 | **척도 앵커를 바꾼 뒤 반드시** |
 | `enrich-decision.mjs [건수]` | 판단 층 3필드 생성 | 신규 데이터가 쌓인 뒤 |
-| `maintain.ps1` | 위 둘 + 승격 검사를 매일 자동 실행 | 한 번 등록해두면 끝 |
+| `maintain.ps1` | 위 둘 + 승격 검사를 몰아서 실행 | **앵커 수정 후 전량 재평가할 때만** |
+| `healthcheck.mjs` | 파이프라인 이상 감지 (anon 키만 필요) | GitHub Actions 가 매일 자동 실행 |
 
 `rescore` 와 `enrich-decision` 은 `scored_at` · `decided_at` 으로 진행 상태를 남겨 **이어서 실행된다.**
 Gemini 무료 쿼터가 하루 한정이라 한 번에 못 끝나므로 이게 없으면 매번 처음부터 다시 태우게 된다.
@@ -152,10 +153,25 @@ node scripts/rescore.mjs           # 아직 재평가 안 된 것만
 node scripts/enrich-decision.mjs   # 아직 판단 층이 없는 것만
 ```
 
-**백로그는 로컬 예약 작업이 알아서 갉아먹게 해뒀다.** `.\scripts\maintain.ps1 -Register` 로 등록하면
-매일 **17:30**(Gemini 일일 쿼터가 리셋되는 태평양 자정 직후)에 재평가 → 판단 층 → 승격 검사를 돌린다.
-service_role 키는 디스크에 두지 않고 Supabase PAT 으로 매 실행 받아 쓴다.
-해제는 `Unregister-ScheduledTask -TaskName BizAtlas-Maintain -Confirm:$false`.
+### 자동 운영 — 노트북과 무관하게 돈다
+
+| 무엇 | 어디서 | 언제 |
+|---|---|---|
+| 수집 (`ingest`) | Supabase pg_cron `bizatlas-ingest` | 4시간마다 (KST 01/05/09/13/17/21시) |
+| 재평가 · 판단 층 · 승격 (`maintain`) | Supabase pg_cron `bizatlas-maintain` | 매일 17:30 KST |
+| 이상 감지 (`healthcheck.mjs`) | GitHub Actions `health.yml` | 매일 09:10 KST |
+| 배포 | GitHub Actions `deploy.yml` | `main` 푸시 시 |
+
+`maintain` 은 원래 로컬 예약 작업이었으나 **2026-08-11 에 엣지 함수로 옮겼다**
+(`scripts/rescore.mjs`·`enrich-decision.mjs` 는 fetch 만 쓰므로 Deno 에서 그대로 돈다).
+1회 95초 예산이라 **10~12건이 상한**이다 — 평상시 신규가 하루 1~8건이라 충분하지만,
+앵커를 고쳐 100건 넘게 다시 매겨야 할 때는 로컬 `maintain.ps1` 을 반복 실행하는 쪽이 훨씬 빠르다
+(프로세스를 새로 띄우면 모델 폴백 체인이 앞에서부터 다시 시도된다).
+
+**`pg_cron` 의 `succeeded` 를 믿지 말 것.** `pg_net` 이 HTTP 요청을 던진 시점에 성공으로
+기록되므로 함수가 500 으로 죽어도 계속 `succeeded` 로 남는다. 실제 상태는 `ingest_runs` 나
+헬스체크로 봐야 한다. (`timeout_milliseconds` 를 안 주면 pg_net 기본값 5초에 걸려
+결과를 아예 못 받으므로 두 잡 모두 170초를 명시해뒀다.)
 
 > PowerShell 5.1 은 BOM 없는 .ps1 을 ANSI 로 읽어 한글 문자열이 깨지고 파서 에러가 난다.
 > 이 repo 의 .ps1 을 편집할 때는 **UTF-8 with BOM 유지**할 것.
