@@ -10,44 +10,77 @@ import { kstDayKey, kstDayStart, fmtKstTime, nextRunLabel, sumRuns } from '../li
 
 const TREND_DAYS = 7
 
-function Tile({ label, value, hint, tone = 'ink' }) {
+// to 가 있으면 숫자가 곧 그 항목들만 모아보는 링크가 된다.
+function Tile({ label, value, hint, tone = 'ink', to, linkHint }) {
   const tones = {
     brand: 'text-brand-700',
     ink: 'text-ink-900',
     muted: 'text-ink-500',
     danger: 'text-rose-600',
   }
+  const num = `mt-1 text-2xl font-bold tabular-nums ${tones[tone]}`
   return (
     <div className="rounded-xl border border-ink-200 bg-white p-4">
       <p className="text-xs font-medium text-ink-500">{label}</p>
-      <p className={`mt-1 text-2xl font-bold tabular-nums ${tones[tone]}`}>{value.toLocaleString()}</p>
+      {to && value > 0 ? (
+        <Link
+          to={to}
+          title={linkHint}
+          className={`${num} block underline decoration-brand-300 underline-offset-4 hover:decoration-brand-600`}
+        >
+          {value.toLocaleString()}
+        </Link>
+      ) : (
+        <p className={num}>{value.toLocaleString()}</p>
+      )}
       {hint && <p className="mt-0.5 text-[11px] leading-snug text-ink-400">{hint}</p>}
     </div>
   )
 }
 
 // 단일 측정값(일별 신규 등록)의 크기 비교 — 한 가지 색조만 쓰고, 오늘만 진하게 강조한다.
+// 항목이 있는 날의 막대는 그날 등록분만 모아 보는 링크다 (tier 가 섞이므로 all 로 연다).
 function TrendBars({ days }) {
   const max = Math.max(1, ...days.map((d) => d.count))
   return (
     <div className="flex items-end gap-2">
-      {days.map((d) => (
-        <div key={d.key} className="flex flex-1 flex-col items-center gap-1">
-          <span className="text-[11px] font-medium tabular-nums text-ink-500">
-            {d.count > 0 ? d.count : ''}
-          </span>
-          <div
-            title={`${d.key} · ${d.count}건`}
-            className={`w-full rounded-t ${d.today ? 'bg-brand-600' : 'bg-brand-200'}`}
-            style={{ height: `${d.count > 0 ? Math.max(4, (d.count / max) * 64) : 2}px` }}
-          />
-          <span
-            className={`text-[11px] tabular-nums ${d.today ? 'font-semibold text-ink-700' : 'text-ink-400'}`}
+      {days.map((d) => {
+        const bar = (
+          <>
+            <span className="text-[11px] font-medium tabular-nums text-ink-500">
+              {d.count > 0 ? d.count : ''}
+            </span>
+            <div
+              className={`w-full rounded-t transition ${
+                d.today ? 'bg-brand-600' : 'bg-brand-200'
+              } ${d.count > 0 ? 'group-hover:bg-brand-500' : ''}`}
+              style={{ height: `${d.count > 0 ? Math.max(4, (d.count / max) * 64) : 2}px` }}
+            />
+            <span
+              className={`text-[11px] tabular-nums ${
+                d.today ? 'font-semibold text-ink-700' : 'text-ink-400'
+              }`}
+            >
+              {d.key.slice(5)}
+            </span>
+          </>
+        )
+        const cls = 'group flex flex-1 flex-col items-center gap-1'
+        return d.count > 0 ? (
+          <Link
+            key={d.key}
+            to={`/?day=${d.key}&tier=all`}
+            title={`${d.key} 등록분 ${d.count}건 모아 보기`}
+            className={cls}
           >
-            {d.key.slice(5)}
-          </span>
-        </div>
-      ))}
+            {bar}
+          </Link>
+        ) : (
+          <div key={d.key} className={cls} title={`${d.key} · 0건`}>
+            {bar}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -201,6 +234,8 @@ export default function Today() {
               label="오늘 새로 등록"
               value={todayRows.length}
               tone="brand"
+              to="/?since=today&tier=all"
+              linkHint="오늘 등록분만 필터·정렬해서 보기"
               hint={`검증된 모델 ${tierCount.proven} · 최신 동향 ${tierCount.emerging}`}
             />
             <Tile
@@ -237,7 +272,7 @@ export default function Today() {
 
           <section className="mt-6 rounded-xl border border-ink-200 bg-white p-4">
             <h2 className="text-sm font-semibold">최근 7일 신규 등록</h2>
-            <p className="mt-0.5 mb-3 text-xs text-ink-500">일자별 저장된 항목 수 (KST)</p>
+            <p className="mt-0.5 mb-3 text-xs text-ink-500">일자별 저장된 항목 수 (KST) · 막대를 누르면 그날 등록분만 봅니다</p>
             <TrendBars days={trend} />
           </section>
 
@@ -348,7 +383,17 @@ export default function Today() {
           </div>
 
           <section className="mt-8">
-            <h2 className="text-lg font-semibold">오늘 추가된 항목</h2>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-lg font-semibold">오늘 추가된 항목</h2>
+              {todayRows.length > 0 && (
+                <Link
+                  to="/?since=today&tier=all"
+                  className="text-sm font-medium text-brand-700 hover:underline"
+                >
+                  필터·정렬해서 보기 →
+                </Link>
+              )}
+            </div>
             {todayRows.length === 0 ? (
               <div className="mt-3 rounded-xl border border-dashed border-ink-300 p-10 text-center">
                 <p className="text-sm text-ink-500">

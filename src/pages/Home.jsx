@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Search, SlidersHorizontal, Loader2 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Search, SlidersHorizontal, Loader2, X, Sparkles } from 'lucide-react'
 import { supabase, isConfigured } from '../lib/supabase'
 import BusinessCard from '../components/BusinessCard.jsx'
 import FilterPanel from '../components/FilterPanel.jsx'
 import TodayStrip from '../components/TodayStrip.jsx'
+import { kstDayStart, kstDayRange } from '../lib/today'
 
 const PAGE_SIZE = 24
 
@@ -22,6 +24,15 @@ const EMPTY = {
 const TIERS = {
   proven: { label: '검증된 모델', hint: '설립 5년 이상 · 공개 데이터로 실체와 규모가 확인된 회사' },
   emerging: { label: '최신 동향', hint: '자동 수집된 신생 서비스 · 아직 검증되지 않음' },
+  all: { label: '전체', hint: '검증된 모델과 최신 동향을 함께 봅니다' },
+}
+
+// 등록 시점 필터. 오늘 수집분은 tier 가 섞여 들어오므로(로컬 시드=proven, 파이프라인=emerging)
+// 이 필터로 진입할 때는 tier 를 all 로 두지 않으면 방금 들어온 항목이 탭 뒤에 숨는다.
+const PERIODS = {
+  today: { label: '오늘 신규', days: 0 },
+  d3: { label: '최근 3일', days: 2 },
+  d7: { label: '최근 7일', days: 6 },
 }
 
 const SORTS = {
@@ -33,7 +44,29 @@ const SORTS = {
 
 export default function Home() {
   const [filters, setFilters] = useState(EMPTY)
-  const [tier, setTier] = useState('proven')
+  // tier·기간은 URL 에 둔다 — 오늘 수집 숫자에서 링크로 들어오고, 뒤로가기·공유가 되어야 한다.
+  const [params, setParams] = useSearchParams()
+  const tier = TIERS[params.get('tier')] ? params.get('tier') : 'proven'
+  const since = PERIODS[params.get('since')] ? params.get('since') : ''
+  // day 는 특정 하루만 본다(추이 그래프의 막대에서 진입). since 보다 우선한다.
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(params.get('day') ?? '') ? params.get('day') : ''
+
+  const patchParams = useCallback(
+    (patch) =>
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          for (const [k, v] of Object.entries(patch)) {
+            if (v) next.set(k, v)
+            else next.delete(k)
+          }
+          return next
+        },
+        { replace: true },
+      ),
+    [setParams],
+  )
+
   const [query, setQuery] = useState('')       // 입력 중인 값
   const [sort, setSort] = useState('newest')
   const [rows, setRows] = useState([])
@@ -50,7 +83,7 @@ export default function Home() {
   }, [query])
 
   // 필터가 바뀌면 항상 1페이지부터
-  useEffect(() => { setPage(0) }, [filters, sort, tier])
+  useEffect(() => { setPage(0) }, [filters, sort, tier, since, day])
 
   const activeCount = useMemo(() => {
     let n = 0
@@ -60,8 +93,15 @@ export default function Home() {
     n += filters.moats.length
     if (filters.korea_fit_min > 1) n++
     if (filters.capital_max < 5) n++
+    if (since || day) n++
     return n
-  }, [filters])
+  }, [filters, since, day])
+
+  const resetAll = useCallback(() => {
+    setFilters(EMPTY)
+    setQuery('')
+    patchParams({ since: '', day: '' })
+  }, [patchParams])
 
   const load = useCallback(async () => {
     if (!isConfigured) {
@@ -74,7 +114,14 @@ export default function Home() {
 
     let q = supabase.from('businesses').select('*', { count: 'exact' })
       .eq('status', 'published')
-      .eq('tier', tier)
+
+    if (tier !== 'all') q = q.eq('tier', tier)
+    if (day) {
+      const r = kstDayRange(day)
+      if (r) q = q.gte('created_at', r.start.toISOString()).lt('created_at', r.end.toISOString())
+    } else if (since) {
+      q = q.gte('created_at', kstDayStart(PERIODS[since].days).toISOString())
+    }
 
     if (filters.q.trim()) {
       q = q.textSearch('search_tsv', filters.q.trim(), { config: 'simple', type: 'websearch' })
@@ -99,7 +146,7 @@ export default function Home() {
       setCount(total ?? 0)
     }
     setLoading(false)
-  }, [filters, sort, page, tier])
+  }, [filters, sort, page, tier, since, day])
 
   useEffect(() => { load() }, [load])
 
@@ -118,7 +165,42 @@ export default function Home() {
         </p>
       </section>
 
-      <TodayStrip />
+      {day || since ? (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5">
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-800">
+            <Sparkles size={14} />
+            {day ? `${day} 등록분` : PERIODS[since].label}만 보는 중
+          </span>
+          <span className="text-sm text-brand-900">
+            {loading ? '…' : `${count.toLocaleString()}건`}
+          </span>
+          <div className="flex gap-1">
+            {Object.entries(PERIODS).map(([key, p]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => patchParams({ since: key, day: '' })}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                  !day && since === key
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-white text-brand-700 hover:bg-brand-100'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => patchParams({ since: '', day: '' })}
+            className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline"
+          >
+            <X size={12} /> 기간 해제
+          </button>
+        </div>
+      ) : (
+        <TodayStrip />
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-ink-200 bg-white p-0.5">
@@ -126,7 +208,7 @@ export default function Home() {
             <button
               key={key}
               type="button"
-              onClick={() => setTier(key)}
+              onClick={() => patchParams({ tier: key === 'proven' ? '' : key })}
               title={t.hint}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                 tier === key ? 'bg-brand-600 text-white' : 'text-ink-500 hover:text-ink-800'
@@ -172,7 +254,7 @@ export default function Home() {
           <FilterPanel
             filters={filters}
             setFilters={setFilters}
-            onReset={() => { setFilters(EMPTY); setQuery('') }}
+            onReset={resetAll}
             activeCount={activeCount}
           />
         </div>
@@ -200,7 +282,7 @@ export default function Home() {
               <p className="text-sm text-ink-500">조건에 맞는 항목이 없습니다.</p>
               <button
                 type="button"
-                onClick={() => { setFilters(EMPTY); setQuery('') }}
+                onClick={resetAll}
                 className="mt-3 text-sm font-medium text-brand-700 hover:underline"
               >
                 필터 초기화

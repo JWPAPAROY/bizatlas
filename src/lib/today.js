@@ -23,6 +23,13 @@ export function kstDayKey(ts) {
   return new Date(new Date(ts).getTime() + KST_OFFSET).toISOString().slice(0, 10)
 }
 
+/** 'YYYY-MM-DD'(KST) → 그 하루의 [시작, 끝) 실제 시각. 일자별 목록 필터용 */
+export function kstDayRange(key) {
+  const start = new Date(`${key}T00:00:00+09:00`)
+  if (Number.isNaN(start.getTime())) return null
+  return { start, end: new Date(start.getTime() + DAY) }
+}
+
 export const fmtKstTime = (ts) =>
   new Date(ts).toLocaleTimeString('ko-KR', {
     timeZone: 'Asia/Seoul',

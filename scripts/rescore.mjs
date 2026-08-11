@@ -23,7 +23,7 @@ const LIMIT = Number(process.argv[2]) || 100
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 const MODELS = [
   'gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-flash-lite-latest',
-  'gemini-3.1-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+  'gemini-3.1-flash-lite', 'gemini-3.5-flash',
 ]
 let modelIndex = 0
 
@@ -39,12 +39,21 @@ const SYSTEM = `당신은 비즈니스 모델 애널리스트입니다. 주어�
   같은 사업을 지금 새로 시작한다면 얼마가 필요한가로 판단하세요.
   1=노트북 한 대(SaaS·앱), 2=소규모 클라우드 비용, 3=상당한 GPU·초기 재고,
   4=하드웨어 양산·물류 거점, 5=공장·인허가·중장비
-- replicability: 경쟁자가 같은 것을 만들기까지 걸리는 시간.
-  1=복제 거의 불가(규제 승인·독점 데이터·수년치 R&D), 2=수년 필요,
-  3=자금이 있으면 1년 내, 4=수개월, 5=주말이면 복제 가능(단순 래퍼·CRUD)
+- replicability: 자금과 인력을 갖춘 경쟁자가 **동등한 대체재**를 내놓기까지 걸리는 시간.
+  회사가 내세우는 기술 난이도를 그대로 믿지 마세요. 물어야 할 것은 "지금 이 시장에 비슷한 제품이
+  몇 개나 있는가, 오픈소스나 기성 API 로 얼마나 대체되는가" 입니다.
+  1=복제 거의 불가 — 규제 승인·독점 데이터·수년치 R&D 를 **이미 확보한** 경우만.
+    앞으로 쌓겠다는 계획은 1이 아닙니다.
+  2=수년 필요 — 대규모 실사용 데이터나 양산 경험이 실제로 축적돼 있음
+  3=자금이 있으면 1년 내
+  4=수개월 — 기성 모델·API 조합에 도메인 지식을 얹은 수준
+  5=주말이면 복제 가능 — LLM API 래퍼, 표준 CRUD, 오픈소스 조립
+  **소개 문구만 있고 실사용 규모가 확인되지 않은 신생 서비스는 대부분 4~5 입니다.**
 - korea_fit: 이 모델을 **한국에 그대로 이식**했을 때의 적합성.
   1=한국 규제상 불가능하거나 시장이 없음, 2=국내 사업자가 이미 장악해 진입 무의미,
-  3=가능하지만 현지화 부담이 큼, 4=약간의 현지화로 통함, 5=거의 그대로 통함
+  3=가능하지만 현지화 부담이 큼, 4=약간의 현지화로 통함,
+  5=**한국에서 같은 수요가 이미 실증됐고(비슷한 서비스가 실제로 돈을 벌고 있음) 아직 지배적
+    사업자가 없는 경우에만.** "잘 통할 것 같다"는 기대는 5가 아니라 4 입니다.
   판단 시 반드시 고려: 한국의 규제(의료·금융·개인정보), 시장 규모, 이미 있는 국내 대체재,
   영어권 전용 워크플로 의존 여부. 미국 기업 문화·SaaS 구매 관행에 강하게 묶인 B2B 도구는 2~3 입니다.
   이미 한국에서 성업 중인 모델이면 5 에 가깝습니다.
@@ -92,7 +101,10 @@ async function gemini(user) {
       headers: { 'Content-Type': 'application/json', 'X-goog-api-key': GEMINI_KEY },
       body,
     })
-    if (res.status === 429 || res.status >= 500) {
+    // 404 = 그 모델이 퇴역함(2026-08 gemini-2.0-* 가 이렇게 사라졌다). 429·5xx 와 마찬가지로
+    // 기다려도 회복되지 않으므로 다음 모델로 넘긴다. 여기서 안 걸러주면 체인이 죽은 모델에
+    // 갇혀 남은 항목을 전부 즉시 실패시킨다.
+    if (res.status === 429 || res.status === 404 || res.status >= 500) {
       await res.text()
       if (MODELS.indexOf(model) === modelIndex) modelIndex++
       if (modelIndex >= MODELS.length) throw new Error('QUOTA')

@@ -27,8 +27,7 @@ const GEMINI_MODELS = [
   'gemini-3-flash-preview',   // 버킷 gemini-3-flash-preview
   'gemini-flash-lite-latest', // 버킷 gemini-3.5-flash-lite
   'gemini-3.1-flash-lite',    // 버킷 gemini-3.1-flash-lite
-  'gemini-2.0-flash',         // 버킷 gemini-2.0-flash
-  'gemini-2.0-flash-lite',    // 버킷 gemini-2.0-flash-lite
+  'gemini-3.5-flash',         // 버킷 gemini-3.5-flash (2026-08 재검증: JSON 정상)
 ]
 
 // 엣지 함수 실행 시간 한도가 있으므로 한 번에 다 처리하지 않는다. 매일 돌면 충분히 쌓인다.
@@ -44,6 +43,14 @@ const TIME_BUDGET_MS = 95_000
 // (GenerateContentInputTokensPerModelPerMinute-FreeTier). 그것만 피할 정도로 느슨하게 띄운다.
 const RPM_LIMIT = 30
 const CALL_SPACING_MS = Math.ceil(60_000 / RPM_LIMIT)
+
+// 한 항목에 허용하는 최대 시도 횟수. 이 상한이 없으면 구조적으로 처리 불가능한 항목
+// (본문이 길어 응답이 잘리는 기사 등)이 매 실행마다 영원히 AI 호출을 태운다.
+// 실측으로 하루 12~18회(전체 예산의 10~15%)가 여기서 증발하고 있었다.
+const MAX_ATTEMPTS = 2
+
+// 이 소스들의 항목 링크는 기사 URL 이지 회사 웹사이트가 아니다 (rss=뉴스, atom=Product Hunt 페이지).
+const ARTICLE_LINK_KINDS = new Set(['rss', 'atom'])
 
 // 원문이 이보다 짧으면 AI 를 태워도 "정보 부족"으로 반려된다. 호출 전에 잘라 비용을 아낀다.
 // (Product Hunt Atom 피드가 대표적 — content 가 태그라인 한 줄뿐인 경우가 많다.)
@@ -305,12 +312,21 @@ region: ${list('region')}
   같은 사업을 지금 새로 시작한다면 얼마가 필요한가로 판단하세요.
   1=노트북 한 대(SaaS·앱), 2=소규모 클라우드 비용, 3=상당한 GPU·초기 재고,
   4=하드웨어 양산·물류 거점, 5=공장·인허가·중장비
-- replicability: 경쟁자가 같은 것을 만들기까지 걸리는 시간.
-  1=복제 거의 불가(규제 승인·독점 데이터·수년치 R&D), 2=수년 필요,
-  3=자금이 있으면 1년 내, 4=수개월, 5=주말이면 복제 가능(단순 래퍼·CRUD)
+- replicability: 자금과 인력을 갖춘 경쟁자가 **동등한 대체재**를 내놓기까지 걸리는 시간.
+  회사가 내세우는 기술 난이도를 그대로 믿지 마세요. 물어야 할 것은 "지금 이 시장에 비슷한 제품이
+  몇 개나 있는가, 오픈소스나 기성 API 로 얼마나 대체되는가" 입니다.
+  1=복제 거의 불가 — 규제 승인·독점 데이터·수년치 R&D 를 **이미 확보한** 경우만.
+    앞으로 쌓겠다는 계획은 1이 아닙니다.
+  2=수년 필요 — 대규모 실사용 데이터나 양산 경험이 실제로 축적돼 있음
+  3=자금이 있으면 1년 내
+  4=수개월 — 기성 모델·API 조합에 도메인 지식을 얹은 수준
+  5=주말이면 복제 가능 — LLM API 래퍼, 표준 CRUD, 오픈소스 조립
+  **소개 문구만 있고 실사용 규모가 확인되지 않은 신생 서비스는 대부분 4~5 입니다.**
 - korea_fit: 한국 시장에 **그대로 이식**했을 때의 적합성.
   1=한국 규제상 불가능하거나 시장이 없음, 2=대기업·기존 사업자가 이미 장악해 진입 무의미,
-  3=가능하지만 현지화 부담이 큼, 4=약간의 현지화로 통함, 5=번역만 해도 수요가 있음
+  3=가능하지만 현지화 부담이 큼, 4=약간의 현지화로 통함,
+  5=**한국에서 같은 수요가 이미 실증됐고(비슷한 서비스가 실제로 돈을 벌고 있음) 아직 지배적
+    사업자가 없는 경우에만.** "잘 통할 것 같다"는 기대는 5가 아니라 4 입니다.
   판단 시 반드시 고려: 한국의 규제(의료·금융·개인정보), 시장 규모, 이미 있는 국내 대체재,
   영어권 전용 워크플로 의존 여부. **미국 기업 문화·SaaS 구매 관행에 강하게 묶인 B2B 도구는
   한국 적용성이 낮습니다(2~3).** 무조건 4를 주지 마세요.
@@ -394,7 +410,10 @@ async function structureOne(
 
     // 429 = 그 모델의 하루치 소진, 5xx = 일시적 과부하(HTTP 503 "high demand").
     // 어느 쪽이든 그 모델을 붙잡고 기다릴 이유가 없으니 다음 모델로 넘어간다.
-    if (res.status === 429 || res.status >= 500) {
+    // 404 = 그 모델이 퇴역함(2026-08 gemini-2.0-* 가 이렇게 사라졌다). 429·5xx 와 마찬가지로
+    // 기다려도 회복되지 않으므로 다음 모델로 넘긴다. 여기서 안 걸러주면 체인이 죽은 모델에
+    // 갇혀 남은 항목을 전부 즉시 실패시킨다.
+    if (res.status === 429 || res.status === 404 || res.status >= 500) {
       await res.text()
       // 다른 워커가 이미 모델을 넘겼을 수 있으므로 현재 값과 비교해서만 올린다.
       const exhausted = GEMINI_MODELS.indexOf(model)
@@ -456,7 +475,11 @@ function sanitize(
     name,
     one_liner: oneLiner,
     description: str(parsed.description),
-    website: str(parsed.website, 500) ?? (cand.url || null),
+    // 뉴스 피드에서는 cand.url 이 회사 홈페이지가 아니라 **기사 URL** 이다.
+    // 이걸 fallback 으로 쓰면 회사 웹사이트 칸에 techcrunch.com 이 들어가서,
+    // 화면에도 틀린 링크가 뜨고 위키데이터 대조 같은 후속 검증도 전부 헛돈다.
+    // YC·HN 은 cand.url 이 실제 제품 링크라 fallback 이 유효하다.
+    website: str(parsed.website, 500) ?? (ARTICLE_LINK_KINDS.has(String(src.kind)) ? null : (cand.url || null)),
     hq_country: str(parsed.hq_country, 80),
     region: one('region', parsed.region),
     founded_year: Number.isFinite(year) && year >= 1800 && year <= 2100 ? year : null,
@@ -552,9 +575,14 @@ Deno.serve(async (req) => {
   // ── 2) 이미 판정한 항목 제외 (한 번의 쿼리로)
   const allJobs = perSource.flat()
   const { data: seen } = await supabase
-    .from('seen_items').select('source_item_id')
+    .from('seen_items').select('source_item_id, verdict, attempts')
     .in('source_item_id', allJobs.map((j) => j.cand.sourceItemId))
-  const seenSet = new Set((seen ?? []).map((s) => s.source_item_id))
+  // verdict='retry' 는 "아직 판정이 안 끝난 실패" 라 큐에 남겨야 한다.
+  // 나머지(accepted/rejected)는 판정이 끝난 것이므로 건너뛴다.
+  const seenSet = new Set(
+    (seen ?? []).filter((s) => s.verdict !== 'retry').map((s) => s.source_item_id),
+  )
+  const attemptsOf = new Map((seen ?? []).map((s) => [s.source_item_id, s.attempts ?? 0]))
 
   // ── 3) 소스별로 라운드로빈 배치.
   //    순차로 돌리면 알파벳 순으로 앞선 소스가 예산을 다 써버려 뒤 소스는 한 건도 처리되지 않는다.
@@ -586,7 +614,7 @@ Deno.serve(async (req) => {
 
       // 원문이 얇으면 AI 를 태우지 않고 바로 반려 — 태워도 결과가 같고 비용만 든다.
       if (cand.text.length < MIN_TEXT_CHARS) {
-        await supabase.from('seen_items').insert({
+        await supabase.from('seen_items').upsert({
           source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
           verdict: 'rejected', reason: `원문이 너무 짧음 (${cand.text.length}자) — AI 판정 생략`,
         })
@@ -598,12 +626,12 @@ Deno.serve(async (req) => {
         aiCalls++
         const parsed = await structureOne(geminiKey, systemPrompt, cand)
 
-        // 파싱 실패는 모델이 잘못 뱉은 것이지 항목의 문제가 아니다. 반려로 기록하면
-        // seen_items 에 남아 영원히 재시도되지 않으므로, 에러로 올려 다음 실행에 넘긴다.
-        if (!parsed) throw new Error('JSON 파싱 실패 — 다음 실행에서 재시도')
+        // 파싱 실패는 모델이 잘못 뱉은 것이지 항목의 문제가 아니라, 다음 실행에 넘긴다.
+        // 단 MAX_ATTEMPTS 까지만 — 아래 catch 가 재시도 예산을 관리한다.
+        if (!parsed) throw new Error('JSON 파싱 실패')
 
         if (parsed.is_business !== true) {
-          await supabase.from('seen_items').insert({
+          await supabase.from('seen_items').upsert({
             source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
             verdict: 'rejected',
             reason: String(parsed.reject_reason ?? 'is_business=false').slice(0, 300),
@@ -614,7 +642,7 @@ Deno.serve(async (req) => {
 
         const row = sanitize(parsed, vocab, cand, src)
         if (!row) {
-          await supabase.from('seen_items').insert({
+          await supabase.from('seen_items').upsert({
             source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
             verdict: 'rejected', reason: '필수 필드(name/one_liner) 누락',
           })
@@ -625,17 +653,40 @@ Deno.serve(async (req) => {
         const { error: insErr } = await supabase.from('businesses').insert(row)
         if (insErr) throw new Error(insErr.message)
 
-        await supabase.from('seen_items').insert({
+        await supabase.from('seen_items').upsert({
           source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url, verdict: 'accepted',
         })
         log.created++; created++
       } catch (e) {
-        // 개별 항목 실패는 삼키고 계속 — seen_items 에 남기지 않아 다음 실행에서 재시도된다.
         const msg = e instanceof Error ? e.message : String(e)
-        if (msg.includes('쿼터 소진')) quotaHalted = true
+
+        // 쿼터 소진은 항목의 잘못이 아니다 — 재시도 횟수로 세면 안 된다.
+        // 이걸 세면 쿼터가 마른 날 큐 뒤쪽 항목들이 애먼 이유로 영구 반려된다.
+        if (msg.includes('쿼터 소진')) {
+          quotaHalted = true
+          log.failed++; failed++
+          if (errorSamples.length < 5) errorSamples.push(`[${src.name}] ${msg}`)
+          continue
+        }
+
+        // 재시도 예산 관리: 상한에 닿으면 반려로 확정해 큐에서 영구히 뺀다.
+        // 안 그러면 구조적으로 처리 불가능한 항목이 매 실행 AI 호출을 태운다.
+        const tried = (attemptsOf.get(cand.sourceItemId) ?? 0) + 1
+        const exhausted = tried >= MAX_ATTEMPTS
+        await supabase.from('seen_items').upsert({
+          source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
+          verdict: exhausted ? 'rejected' : 'retry',
+          attempts: tried,
+          reason: exhausted
+            ? `${MAX_ATTEMPTS}회 시도 실패로 반려: ${msg}`.slice(0, 300)
+            : `${tried}/${MAX_ATTEMPTS}회 실패 — 다음 실행에서 재시도: ${msg}`.slice(0, 300),
+        }, { onConflict: 'source_item_id' })
+
         log.failed++; failed++
-        if (errorSamples.length < 5) errorSamples.push(`[${src.name}] ${msg}`)
-        console.error(`[${src.name}] ${cand.sourceItemId}:`, msg)
+        if (errorSamples.length < 5) {
+          errorSamples.push(`[${src.name}] ${msg} (${tried}/${MAX_ATTEMPTS}${exhausted ? ' → 반려 확정' : ''})`)
+        }
+        console.error(`[${src.name}] ${cand.sourceItemId}:`, msg, `${tried}/${MAX_ATTEMPTS}`)
       }
     }
   }

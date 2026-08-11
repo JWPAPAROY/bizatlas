@@ -23,7 +23,7 @@ const LIMIT = Number(process.argv[2]) || 100
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 const MODELS = [
   'gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-flash-lite-latest',
-  'gemini-3.1-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+  'gemini-3.1-flash-lite', 'gemini-3.5-flash',
 ]
 let modelIndex = 0
 
@@ -89,7 +89,10 @@ async function gemini(user) {
       headers: { 'Content-Type': 'application/json', 'X-goog-api-key': GEMINI_KEY },
       body,
     })
-    if (res.status === 429 || res.status >= 500) {
+    // 404 = 그 모델이 퇴역함(2026-08 gemini-2.0-* 가 이렇게 사라졌다). 429·5xx 와 마찬가지로
+    // 기다려도 회복되지 않으므로 다음 모델로 넘긴다. 여기서 안 걸러주면 체인이 죽은 모델에
+    // 갇혀 남은 항목을 전부 즉시 실패시킨다.
+    if (res.status === 429 || res.status === 404 || res.status >= 500) {
       await res.text()
       if (MODELS.indexOf(model) === modelIndex) modelIndex++
       if (modelIndex >= MODELS.length) throw new Error('QUOTA')

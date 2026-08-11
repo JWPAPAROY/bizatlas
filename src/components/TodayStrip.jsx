@@ -46,10 +46,7 @@ export default function TodayStrip() {
   const { added, runs, totals, running, lastAt } = state
 
   return (
-    <Link
-      to="/today"
-      className="group mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-ink-200 bg-white px-4 py-2.5 transition hover:border-brand-200 hover:shadow-sm"
-    >
+    <div className="group mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-ink-200 bg-white px-4 py-2.5 transition hover:border-brand-200 hover:shadow-sm">
       <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-500">
         {running ? (
           <Loader2 size={12} className="animate-spin text-brand-600" />
@@ -59,9 +56,20 @@ export default function TodayStrip() {
         오늘 {kstDayKey(Date.now()).slice(5)}
       </span>
 
-      <span className="text-sm text-ink-700">
-        새로 등록 <strong className="tabular-nums text-brand-700">{added}</strong>건
-      </span>
+      {/* 숫자 자체가 "그 항목들만 모아보기" 진입점이다. 오늘 들어온 것은 tier 가 섞이므로 all 로 연다. */}
+      {added > 0 ? (
+        <Link
+          to="/?since=today&tier=all"
+          className="rounded text-sm text-ink-700 underline decoration-brand-300 underline-offset-4 hover:decoration-brand-600 hover:text-brand-800"
+          title="오늘 새로 등록된 항목만 모아 보기"
+        >
+          새로 등록 <strong className="tabular-nums text-brand-700">{added}</strong>건
+        </Link>
+      ) : (
+        <span className="text-sm text-ink-500">
+          새로 등록 <strong className="tabular-nums">0</strong>건
+        </span>
+      )}
       <span className="text-sm text-ink-600">
         검토 <span className="tabular-nums">{totals.fetched}</span>건
       </span>
@@ -80,10 +88,13 @@ export default function TodayStrip() {
         {runs.length > 0 && ` · ${runs.length}회`}
       </span>
 
-      <span className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium text-brand-700">
+      <Link
+        to="/today"
+        className="ml-auto inline-flex items-center gap-0.5 text-xs font-medium text-brand-700 hover:underline"
+      >
         수집 현황
         <ChevronRight size={13} className="transition group-hover:translate-x-0.5" />
-      </span>
-    </Link>
+      </Link>
+    </div>
   )
 }

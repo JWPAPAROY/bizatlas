@@ -6,3 +6,6 @@ dist
 *.log
 .vite
 
+
+# supabase CLI 가 만드는 로컬 링크 정보
+supabase/.temp

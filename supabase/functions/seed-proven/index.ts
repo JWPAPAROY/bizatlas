@@ -19,8 +19,7 @@ const GEMINI_MODELS = [
   'gemini-3-flash-preview',
   'gemini-flash-lite-latest',
   'gemini-3.1-flash-lite',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
+  'gemini-3.5-flash',
 ]
 
 const DART_API = 'https://opendart.fss.or.kr/api'
@@ -99,7 +98,10 @@ async function gemini(apiKey: string, system: string, user: string, maxTokens = 
       body,
     })
     // 429 = 그 모델의 하루치 소진, 5xx = 일시적 과부하. 둘 다 기다려도 소용없으니 다음 모델로.
-    if (res.status === 429 || res.status >= 500) {
+    // 404 = 그 모델이 퇴역함(2026-08 gemini-2.0-* 가 이렇게 사라졌다). 429·5xx 와 마찬가지로
+    // 기다려도 회복되지 않으므로 다음 모델로 넘긴다. 여기서 안 걸러주면 체인이 죽은 모델에
+    // 갇혀 남은 항목을 전부 즉시 실패시킨다.
+    if (res.status === 429 || res.status === 404 || res.status >= 500) {
       await res.text()
       if (GEMINI_MODELS.indexOf(model) === modelIndex) modelIndex++
       if (modelIndex >= GEMINI_MODELS.length) {
@@ -325,6 +327,15 @@ async function resolveKorean(supabase: any, dartKey: string, names: string[]): P
   }
 }
 
+// 회사 웹사이트의 등록 도메인. 승격 시 동일 회사인지 확인하는 데 쓴다.
+function domainOf(url: string | null | undefined): string {
+  if (!url) return ''
+  try {
+    const h = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.toLowerCase()
+    return h.replace(/^www\./, '')
+  } catch { return '' }
+}
+
 type Gate = { pass: boolean; ageYears: number | null; scale: string | null; reasons: string[] }
 
 function judge(e: WdEntity): Gate {
@@ -401,12 +412,20 @@ region: ${list('region')}
   같은 사업을 지금 새로 시작한다면 얼마가 필요한가로 판단하세요.
   1=노트북 한 대(SaaS·앱), 2=소규모 클라우드 비용, 3=상당한 GPU·초기 재고,
   4=하드웨어 양산·물류 거점, 5=공장·인허가·중장비
-- replicability: 경쟁자가 같은 것을 만들기까지 걸리는 시간.
-  1=복제 거의 불가(규제 승인·독점 데이터·수년치 R&D), 2=수년 필요,
-  3=자금이 있으면 1년 내, 4=수개월, 5=주말이면 복제 가능(단순 래퍼·CRUD)
+- replicability: 자금과 인력을 갖춘 경쟁자가 **동등한 대체재**를 내놓기까지 걸리는 시간.
+  회사가 내세우는 기술 난이도를 그대로 믿지 마세요. 물어야 할 것은 "지금 이 시장에 비슷한 제품이
+  몇 개나 있는가, 오픈소스나 기성 API 로 얼마나 대체되는가" 입니다.
+  1=복제 거의 불가 — 규제 승인·독점 데이터·수년치 R&D 를 **이미 확보한** 경우만.
+    앞으로 쌓겠다는 계획은 1이 아닙니다.
+  2=수년 필요 — 대규모 실사용 데이터나 양산 경험이 실제로 축적돼 있음
+  3=자금이 있으면 1년 내
+  4=수개월 — 기성 모델·API 조합에 도메인 지식을 얹은 수준
+  5=주말이면 복제 가능 — LLM API 래퍼, 표준 CRUD, 오픈소스 조립
+  **소개 문구만 있고 실사용 규모가 확인되지 않은 신생 서비스는 대부분 4~5 입니다.**
 - korea_fit: **이 모델을 한국에 이식했을 때**의 적합성.
-  1=규제상 불가능하거나 시장 없음, 2=국내 사업자가 이미 장악, 3=현지화 부담 큼, 4=약간의 현지화로 통함, 5=그대로 통함
-  이미 한국에서 성업 중인 모델이면 5 에 가깝고, 미국 특유의 문화·제도에 묶였으면 1~2 입니다.
+  1=규제상 불가능하거나 시장 없음, 2=국내 사업자가 이미 장악, 3=현지화 부담 큼, 4=약간의 현지화로 통함,
+  5=**한국에서 같은 수요가 이미 실증됐고 아직 지배적 사업자가 없는 경우에만.**
+  "잘 통할 것 같다"는 기대는 5가 아니라 4 입니다. 미국 특유의 문화·제도에 묶였으면 1~2 입니다.
 
 ## 출력 (JSON 만)
 {
@@ -459,6 +478,87 @@ Deno.serve(async (req) => {
   const dartKey = Deno.env.get('DART_API_KEY') ?? ''
   if (isKorea && !dartKey) {
     return json(400, { error: 'region=korea 는 DART_API_KEY 시크릿이 필요합니다.' })
+  }
+
+  // ── 승격 모드: 이미 들어와 있는 emerging 을 Wikidata 로 재검증해 proven 으로 올린다.
+  //
+  // tier 를 소스로만 정하다 보니(파이프라인=emerging, 시드=proven) OpenAI 처럼 명백히 검증된
+  // 회사가 "TechCrunch 로 들어왔다"는 이유만으로 미검증 칸에 갇힌다. 등급은 출처가 아니라
+  // 실체 확인 여부로 정해져야 한다.
+  //
+  // AI 를 전혀 쓰지 않는다 — 축 태깅은 이미 되어 있고, 여기서 필요한 건 사실 조회뿐이라
+  // 쿼터를 한 건도 쓰지 않는다.
+  if (body.mode === 'promote') {
+    const limit = Math.min(Number(body.limit) || 40, 100)
+    const { data: rows } = await supabase
+      .from('businesses')
+      .select('id, name, website, founded_year, source_url')
+      .eq('tier', 'emerging').eq('status', 'published')
+      .order('created_at', { ascending: true }).limit(limit)
+
+    const plog = { scanned: rows?.length ?? 0, resolved: 0, promoted: 0, failed: 0 }
+    const promoted: string[] = []
+    const skipped: string[] = []
+    const perrors: string[] = []
+
+    await Promise.all((rows ?? []).map(async (b: Record<string, unknown>) => {
+      const name = String(b.name ?? '')
+      try {
+        const e = await resolveCompany([name])
+        if (!e) { skipped.push(`${name}: 위키데이터에 기업 엔티티 없음`); return }
+        plog.resolved++
+
+        // 동명이인 방어. 검증된 모델 칸은 이 서비스의 신뢰 기준선이라 재현율보다 정밀도를 택한다.
+        // 도메인이 양쪽에 다 있으면 그게 가장 강한 동일성 증거고, 없으면 표제어 완전 일치만 받는다.
+        // 뉴스 소스로 들어온 행은 website 에 기사 URL 이 들어 있을 수 있다(과거 ingest 버그).
+        // 그 값을 도메인 근거로 쓰면 techcrunch.com ≠ openai.com 이라며 멀쩡한 회사를 떨군다.
+        // 출처 링크와 같은 호스트면 회사 웹사이트로 인정하지 않고 표제어 일치로 넘긴다.
+        const dSrc = domainOf(b.source_url as string)
+        const dRaw = domainOf(b.website as string)
+        const dBiz = dRaw && dRaw === dSrc ? '' : dRaw
+        const dWd = domainOf(e.website)
+        const nameHit = [e.labelEn, e.labelKo].filter(Boolean)
+          .some((l) => String(l).toLowerCase() === name.toLowerCase())
+        if (dBiz && dWd) {
+          if (dBiz !== dWd) { skipped.push(`${name}: 도메인 불일치 (${dBiz} ≠ ${dWd})`); return }
+        } else if (!nameHit) {
+          skipped.push(`${name}: 동일 회사 확증 불가 (도메인 없음 + 표제어 불일치)`)
+          return
+        }
+
+        const gate = judge(e)
+        if (!gate.pass) { skipped.push(`${name}: ${gate.reasons.join(', ')}`); return }
+
+        const patch: Record<string, unknown> = {
+          tier: 'proven',
+          evidence: {
+            source: e.source, entity: e.id, url: e.url,
+            inception: e.inception, age_years: gate.ageYears, scale: gate.scale,
+            revenue: e.revenue, revenue_year: e.revenueYear, revenue_currency: e.revenueCurrency,
+            employees: e.employees, sitelinks: e.sitelinks,
+            // 원래 소스(source_name/url)는 그대로 둔다 — 원문과 검증처는 다른 정보다.
+            promoted_from: 'emerging',
+          },
+        }
+        // 설립연도는 검증된 사실이므로 Wikidata 값으로 덮는다 (기존 값은 AI 추정치다).
+        const year = e.inception ? Number(e.inception.slice(0, 4)) : null
+        if (year && year > 1000) patch.founded_year = year
+
+        const { error: upErr } = await supabase.from('businesses').update(patch).eq('id', b.id)
+        if (upErr) throw new Error(upErr.message)
+        plog.promoted++
+        promoted.push(`${name} (${gate.scale}, 업력 ${gate.ageYears}년)`)
+      } catch (err) {
+        plog.failed++
+        perrors.push(`${name}: ${err instanceof Error ? err.message : err}`)
+      }
+    }))
+
+    return json(200, {
+      ok: true, mode: 'promote', ...plog,
+      elapsed_ms: Date.now() - startedAt,
+      promoted, skipped: skipped.slice(0, 40), errors: perrors.slice(0, 5),
+    })
   }
 
   const { data: vocabRows } = await supabase.from('taxonomy').select('kind, value, label_ko')
