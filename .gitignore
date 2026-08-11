@@ -9,3 +9,7 @@ dist
 
 # supabase CLI 가 만드는 로컬 링크 정보
 supabase/.temp
+
+# 런타임에 받아 쓰는 키 (디스크에 남기지 않는다)
+.svckey
+.sbtoken

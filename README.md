@@ -141,6 +141,7 @@ node scripts/seed-korea.mjs fintech 8
 | `seed-korea.mjs [분야] [개수]` | 한국 검증 코퍼스 시드 | 코퍼스를 늘릴 때 (`DART_API_KEY` 필요) |
 | `rescore.mjs [건수]` | 1~5 척도 재평가 | **척도 앵커를 바꾼 뒤 반드시** |
 | `enrich-decision.mjs [건수]` | 판단 층 3필드 생성 | 신규 데이터가 쌓인 뒤 |
+| `maintain.ps1` | 위 둘 + 승격 검사를 매일 자동 실행 | 한 번 등록해두면 끝 |
 
 `rescore` 와 `enrich-decision` 은 `scored_at` · `decided_at` 으로 진행 상태를 남겨 **이어서 실행된다.**
 Gemini 무료 쿼터가 하루 한정이라 한 번에 못 끝나므로 이게 없으면 매번 처음부터 다시 태우게 된다.
@@ -150,6 +151,14 @@ Gemini 무료 쿼터가 하루 한정이라 한 번에 못 끝나므로 이게 �
 node scripts/rescore.mjs           # 아직 재평가 안 된 것만
 node scripts/enrich-decision.mjs   # 아직 판단 층이 없는 것만
 ```
+
+**백로그는 로컬 예약 작업이 알아서 갉아먹게 해뒀다.** `.\scripts\maintain.ps1 -Register` 로 등록하면
+매일 **17:30**(Gemini 일일 쿼터가 리셋되는 태평양 자정 직후)에 재평가 → 판단 층 → 승격 검사를 돌린다.
+service_role 키는 디스크에 두지 않고 Supabase PAT 으로 매 실행 받아 쓴다.
+해제는 `Unregister-ScheduledTask -TaskName BizAtlas-Maintain -Confirm:$false`.
+
+> PowerShell 5.1 은 BOM 없는 .ps1 을 ANSI 로 읽어 한글 문자열이 깨지고 파서 에러가 난다.
+> 이 repo 의 .ps1 을 편집할 때는 **UTF-8 with BOM 유지**할 것.
 
 ## 수집 파이프라인
 
