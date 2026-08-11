@@ -170,8 +170,11 @@ service_role 키는 디스크에 두지 않고 Supabase PAT 으로 매 실행 �
 
 | 소스 | 형식 | 비고 |
 |---|---|---|
-| Y Combinator | 공개 JSON API | 구조화 필드가 풍부해 품질이 가장 좋다 |
-| Product Hunt | Atom | 피드 본문이 태그라인 한 줄뿐인 경우가 많아 수율이 낮다 |
+| Y Combinator | 공개 JSON API | 구조화 필드가 풍부해 품질이 가장 좋다 (누적 채택률 61%) |
+| EU-Startups | RSS | 유럽. 투자유치 기사 중심 — **첫 실행 10건 중 6건 채택으로 현재 최고 수율** |
+| e27 | RSS | 동남아. 피드에 본문이 통째로 들어온다 |
+| TechNode | RSS | 중국. 제품·정책 뉴스 비중이 높아 반려율은 높다 |
+| ~~Product Hunt~~ | Atom | **2026-08-11 중단.** 155건 판정에 채택 0건 — 피드 본문이 태그라인 한 줄이라 구조적으로 수율이 0이다 (147건은 `MIN_TEXT_CHARS` 가 AI 전에 잘라냈고, 태운 8건도 전부 반려) |
 | Hacker News (Show HN) | Algolia API | `/search`(points 랭킹) 사용 — `search_by_date` 는 신규 글이라 점수가 0이라 전부 걸러진다 |
 | TechCrunch | RSS | 회사 소개가 아닌 기사가 섞여 AI 판별 의존도가 높다 |
 | TechCrunch Venture | RSS | **투자유치 금액의 주력 소스** — 18건 중 13건에 금액이 명시된다 |
@@ -207,6 +210,20 @@ service_role 키는 디스크에 두지 않고 Supabase PAT 으로 매 실행 �
   `verdict='retry'` 는 큐에 남고, 상한에 닿으면 `'rejected'` 로 확정된다.
   **쿼터 소진 실패는 attempts 로 세지 않는다** (항목 잘못이 아니라서, 세면 쿼터가 마른 날
   큐 뒤쪽이 애먼 이유로 영구 반려된다).
+- **수집 단위는 회사지 제품이 아니다.** 프롬프트가 name 을 "회사/제품명"으로 받고 있어서
+  "OpenAI AI Smart Speaker"·"Spotify (AI Remix & Covers)"·"Kindle Scribe Colorsoft" 같은
+  제품 발표 기사가 회사 행으로 쌓였다. 같은 실체가 이름만 달리해 중복되면 `canonical_key`
+  유니크 인덱스도 못 막는다. → name 은 **운영 주체 회사명**으로 강제하고, 알려진 회사의
+  신제품·신기능 기사와 펀드·ETF 는 반려한다. 중복(23505)은 에러가 아니라 반려로 확정한다.
+- **`hq_country` 는 통제 어휘가 없는 자유 텍스트라 프롬프트만으로는 샌다** — "United States" 45건
+  옆에 "USA" 9건이 따로 쌓여 있었다. `COUNTRY_ALIASES` 로 코드에서 한 번 더 정규화한다.
+- **`region` 에 global 을 남발하면 축이 죽는다.** "인터넷으로 어디서나 쓴다"는 이유로 global 이
+  붙어 42/118 이 global 이었다. global 은 여러 대륙에 실제 거점이 있는 다국적 기업에만 쓴다(→ 9건).
+- **위키데이터는 유명 서비스를 "회사"로 모델링하지 않는다.** Spotify(P31=브랜드·스트리밍서비스,
+  sitelinks 104)가 P31 화이트리스트에서 탈락하고, 같은 이름의 **빈 껍데기 엔티티**가 대신 잡혀
+  "규모 확인 불가"로 떨어졌다. → 업종·법인격·본사·대표·매출·직원수(P452/P1454/P159/P169/P2139/P1128)
+  중 하나만 있어도 기업으로 인정하고, 검색 결과 중 **근거가 가장 두꺼운 엔티티**를 고른다.
+  (지명 오탐 방어는 유지된다 — Kupang 같은 지명에는 이 클레임이 하나도 없다.)
 - **뉴스 소스에서 `cand.url` 은 회사 홈페이지가 아니라 기사 URL 이다.** AI 가 website 를 못 뽑았을 때
   이걸 fallback 으로 쓰면 회사 웹사이트 칸에 `techcrunch.com` 이 들어간다(실제로 42건 발생, 정리 완료).
   `ARTICLE_LINK_KINDS`(rss·atom)는 fallback 하지 않는다. YC·HN 은 항목 링크가 실제 제품 URL 이라 유효하다.

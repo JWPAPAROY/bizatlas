@@ -49,6 +49,34 @@ const CALL_SPACING_MS = Math.ceil(60_000 / RPM_LIMIT)
 // 실측으로 하루 12~18회(전체 예산의 10~15%)가 여기서 증발하고 있었다.
 const MAX_ATTEMPTS = 2
 
+// 국가명은 통제 어휘 테이블이 없는 자유 텍스트라 프롬프트만으로는 표기가 샌다
+// (실측: "United States" 45건 옆에 "USA" 9건이 따로 쌓여 있었다).
+// 집계·표시가 갈리지 않게 코드에서 한 번 더 정규화한다.
+const COUNTRY_ALIASES: Record<string, string> = {
+  'usa': 'United States',
+  'us': 'United States',
+  'u.s.': 'United States',
+  'u.s.a.': 'United States',
+  'united states of america': 'United States',
+  'america': 'United States',
+  'korea': 'South Korea',
+  'republic of korea': 'South Korea',
+  'uk': 'United Kingdom',
+  'u.k.': 'United Kingdom',
+  'great britain': 'United Kingdom',
+  'england': 'United Kingdom',
+  'uae': 'United Arab Emirates',
+  'prc': 'China',
+  "people's republic of china": 'China',
+  'deutschland': 'Germany',
+}
+
+function normalizeCountry(v: string | null): string | null {
+  if (!v) return null
+  const hit = COUNTRY_ALIASES[v.trim().toLowerCase()]
+  return hit ?? v.trim()
+}
+
 // 이 소스들의 항목 링크는 기사 URL 이지 회사 웹사이트가 아니다 (rss=뉴스, atom=Product Hunt 페이지).
 const ARTICLE_LINK_KINDS = new Set(['rss', 'atom'])
 
@@ -272,10 +300,20 @@ function buildPrompt(vocab: Vocab): string {
 **벤처캐피털의 펀드 결성 기사도 반려하세요** ("Index Ventures raises $2B across three funds" 류).
 VC 는 우리가 수집하는 비즈니스 모델이 아닙니다. 단, VC 가 특정 스타트업에 투자한 기사라면
 그 **투자받은 스타트업**을 대상으로 작성하세요.
+**펀드·ETF·투자상품 자체도 반려하세요** ("Robinhood Venture Fund II" 류). 상장돼 있어도 회사가 아닙니다.
+
+**이미 알려진 회사의 신제품·신기능 출시 기사는 반려하세요.**
+우리가 모으는 단위는 **회사(비즈니스 모델)**이지 제품이 아닙니다. 애플의 새 아이패드,
+스포티파이의 새 AI 기능, 아마존의 새 킨들 같은 기사는 그 회사의 수익 구조를 바꾸지 않으므로
+반려 대상입니다. reject_reason 에 "기존 회사의 제품 출시 기사"라고 쓰세요.
+예외: **그 제품이 곧 그 회사의 사업 전부인 신생 회사**라면 회사 단위로 작성하세요.
+
 확실하지 않으면 반려하세요. 데이터 품질이 수집량보다 중요합니다.
 
 ## 작성 규칙
 - name, hq_country 를 제외한 모든 서술형 필드는 **한국어**로 작성합니다.
+- **name 은 항상 운영 주체인 회사명입니다.** 제품명·서비스명·기능명을 쓰지 마세요.
+  같은 회사가 제품별로 여러 번 등록되면 비교 축이 무의미해집니다.
 - 원문에 없는 사실을 지어내지 마세요. 모르는 필드는 null 또는 빈 배열로 두세요.
 - traction(매출·사용자수·투자유치·기업가치)은 **원문에 명시된 수치만** 넣습니다. 추정 금지.
   단 명시돼 있으면 반드시 빠뜨리지 말고 채우세요. 기사에 자주 나오는 형태:
@@ -293,6 +331,15 @@ customer_type: ${list('customer_type')}
 revenue_model: ${list('revenue_model')}
 moat: ${list('moat')}
 region: ${list('region')}
+
+**region 은 본사가 있는 지역입니다.** 서비스가 인터넷으로 어디서나 접속된다는 이유로 global 을
+쓰지 마세요 — 그러면 거의 모든 항목이 global 이 되어 이 축이 쓸모없어집니다.
+global 은 **여러 대륙에 실제 법인·거점을 두고 운영하는 다국적 기업**에만 씁니다.
+본사 국가를 알면 그 지역 값을 쓰고, 모르면 null 로 두세요.
+
+**hq_country 는 영문 정식 국가명 전체를 씁니다** — "United States"(O), "USA"·"US"(X),
+"South Korea"(O), "Korea"(X), "United Kingdom"(O), "UK"(X). 약어를 쓰면 같은 나라가
+두 값으로 갈려 집계가 깨집니다.
 
 ## 해자 판정 규칙 (엄격히)
 해자는 "이미 확보한 방어막"만 인정합니다. 앞으로 생길 것 같다는 추정은 해자가 아닙니다.
@@ -348,7 +395,7 @@ region: ${list('region')}
 {
   "is_business": true,
   "reject_reason": null,
-  "name": "회사/제품명 (원문 표기 그대로)",
+  "name": "제품명이 아니라 **그 제품을 만드는 회사명** (원문 표기 그대로. 예: 'ChatGPT 스피커' 가 아니라 'OpenAI')",
   "one_liner": "한 줄 요약 (한국어, 40자 내외)",
   "description": "무엇을 누구에게 어떻게 파는지 3~5문장 (한국어)",
   "website": "https://... 또는 null",
@@ -491,7 +538,7 @@ function sanitize(
     // 화면에도 틀린 링크가 뜨고 위키데이터 대조 같은 후속 검증도 전부 헛돈다.
     // YC·HN 은 cand.url 이 실제 제품 링크라 fallback 이 유효하다.
     website: str(parsed.website, 500) ?? (ARTICLE_LINK_KINDS.has(String(src.kind)) ? null : (cand.url || null)),
-    hq_country: str(parsed.hq_country, 80),
+    hq_country: normalizeCountry(str(parsed.hq_country, 80)),
     region: one('region', parsed.region),
     founded_year: Number.isFinite(year) && year >= 1800 && year <= 2100 ? year : null,
     category: one('category', parsed.category) ?? 'other',
@@ -662,7 +709,20 @@ Deno.serve(async (req) => {
         }
 
         const { error: insErr } = await supabase.from('businesses').insert(row)
-        if (insErr) throw new Error(insErr.message)
+        if (insErr) {
+          // 23505 = canonical_key 중복. 같은 회사가 다른 기사로 또 들어온 정상 상황이다
+          // (제품 출시 기사를 회사명으로 정규화하면 특히 자주 일어난다).
+          // 에러로 올리면 재시도 예산만 축내므로 여기서 반려로 확정한다.
+          if (insErr.code === '23505') {
+            await supabase.from('seen_items').upsert({
+              source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
+              verdict: 'rejected', reason: `이미 등록된 회사 (${row.name})`,
+            })
+            log.skipped++; skipped++
+            continue
+          }
+          throw new Error(insErr.message)
+        }
 
         await supabase.from('seen_items').upsert({
           source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url, verdict: 'accepted',

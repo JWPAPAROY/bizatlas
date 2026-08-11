@@ -201,8 +201,15 @@ async function wdEntity(id: string): Promise<WdEntity | null> {
   if (!e) return null
   const claims = e.claims
   const rev = latestRevenue(claims)
+  // P31 화이트리스트만으로는 부족하다. 위키데이터는 유명 서비스를 회사가 아니라
+  // 브랜드·스트리밍서비스 타입으로 모델링하는 경우가 많아서, Spotify(sitelinks 104)가
+  // 기업이 아니라고 탈락하고 같은 이름의 빈 껍데기 엔티티가 대신 잡혔다.
+  // → "기업이라면 달려 있을 클레임"을 함께 본다. 업종·법인격·본사·대표·매출·직원수 중 하나면 기업으로 인정.
+  //   (도시 오탐 방어는 유지된다 — Kupang 같은 지명에는 이 중 아무것도 없다.)
+  const COMPANY_CLAIMS = ['P452', 'P1454', 'P159', 'P169', 'P2139', 'P1128']
   const isBusiness =
-    claimIds(claims, 'P31').some((t) => BUSINESS_TYPES.has(t)) || claimIds(claims, 'P452').length > 0
+    claimIds(claims, 'P31').some((t) => BUSINESS_TYPES.has(t)) ||
+    COMPANY_CLAIMS.some((p) => (claims?.[p] ?? []).length > 0)
   if (!isBusiness) return null
   return {
     id,
@@ -244,9 +251,19 @@ async function resolveCompany(names: string[]): Promise<WdEntity | null> {
     const url = `${WD_API}?action=wbsearchentities&search=${encodeURIComponent(v)}` +
       `&language=${lang}&uselang=${lang}&type=item&limit=6&format=json&origin=*`
     const j = await wdJson(url)
-    for (const hit of j?.search ?? []) {
+
+    // 첫 매칭을 그냥 쓰면 안 된다. 같은 이름의 **빈 껍데기 엔티티**가 먼저 잡히면
+    // 사실이 하나도 없어 3관문에서 "규모 확인 불가"로 떨어진다(Spotify 가 실제로 그랬다).
+    // 통과한 후보를 모아 근거가 가장 두꺼운 것을 고른다.
+    const found: WdEntity[] = []
+    for (const hit of (j?.search ?? []).slice(0, 4)) {
       const e = await wdEntity(hit.id)
-      if (e) return e
+      if (e) found.push(e)
+    }
+    if (found.length) {
+      const weight = (e: WdEntity) =>
+        (e.revenue ? 1_000_000 : 0) + (e.employees ? 100_000 : 0) + e.sitelinks
+      return found.sort((a, b) => weight(b) - weight(a))[0]
     }
   }
   return null
