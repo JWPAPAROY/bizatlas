@@ -59,6 +59,36 @@ try {
   notes.push(`활성 소스 ${sources.length}개`)
   for (const s of broken) problems.push(`소스 오류: ${s.name} — ${String(s.last_status).slice(0, 120)}`)
 
+  // ── 3-b) 소스가 "조용히" 죽었는가
+  // last_status 로는 못 잡는 유형이 있다. 2026-08-12 의 Hacker News 가 그랬다 —
+  // 소스 URL 이 점수순 엔드포인트라 매번 **같은 30건**이 돌아왔고, 그걸 다 판정한 뒤로
+  // 8일간 신규가 0건이었는데 fetch 자체는 성공하니 last_status 는 계속 'ok' 였다.
+  // 판별 신호: 후보는 꾸준히 들어오는데(fetched>0) 7일간 채택도 실패도 0 = 큐가 고정됐다.
+  //
+  // 경보(exit 1)로 걸지 않고 참고 지표로만 출력한다. YC 처럼 원래 신규가 뜸한 소스가
+  // 정상인데도 걸리기 때문이다 — 사람이 보고 판단할 문제다.
+  // seen_items 는 anon 으로 안 열리므로 ingest_runs.detail(소스별 집계)로 대신 본다.
+  const week = await sb(
+    `ingest_runs?select=detail,started_at&started_at=gte.${hours(24 * 7)}`)
+  const agg = {}
+  for (const r of week) {
+    for (const [name, d] of Object.entries(r.detail ?? {})) {
+      if (name.startsWith('_') || typeof d !== 'object' || !d) continue
+      const a = (agg[name] ??= { fetched: 0, created: 0, failed: 0 })
+      a.fetched += d.fetched ?? 0
+      a.created += d.created ?? 0
+      a.failed += d.failed ?? 0
+    }
+  }
+  const enabled = new Set(sources.map((s) => s.name))
+  const frozen = Object.entries(agg)
+    .filter(([name, a]) => enabled.has(name) && a.fetched > 0 && a.created === 0 && a.failed === 0)
+  if (frozen.length) {
+    notes.push(
+      `7일간 채택·실패가 모두 0인 소스: ${frozen.map(([n, a]) => `${n}(후보 ${a.fetched}건)`).join(', ')}` +
+      ' — 같은 항목만 반복 수집되고 있는지(소스 URL 이 고정 목록을 주는지) 확인하세요.')
+  }
+
   // ── 4) 유지보수(재평가·판단 층)가 멈췄는가
   // 방금 들어온 항목이 아직 비어 있는 건 정상이다. 3일이 지나도 비어 있으면 파이프라인이 멈춘 것이다.
   const stale = await sb(

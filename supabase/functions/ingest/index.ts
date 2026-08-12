@@ -253,9 +253,15 @@ async function parseHn(url: string, limit: number): Promise<Candidate[]> {
   const data = JSON.parse(await fetchText(url))
   const hits = Array.isArray(data?.hits) ? data.hits : []
   return hits
-    // 반응 없는 글은 검증되지 않은 노이즈에 가깝다.
-    // 단 search_by_date(최신순)로 받으면 갓 올라온 글이라 점수가 0에 수렴해 전부 걸러진다.
-    // → 소스 URL 은 points 로 랭킹되는 /search 엔드포인트를 쓴다. 여기 임계값은 안전망.
+    // 반응 없는 글은 검증되지 않은 노이즈에 가깝다. 여기 임계값은 안전망이고,
+    // 실제 하한은 소스 URL 의 numericFilters 로 준다.
+    //
+    // ⚠️ 소스 URL 에 /search 를 쓰지 말 것 (2026-08-12 수정).
+    // /search 는 점수순 랭킹이라 시간 개념이 없어서 **역대 인기 Show HN 30건**이 매번 고정으로
+    // 돌아온다. 2026-08-04 에 그 30건을 전부 판정한 뒤로 8일간 신규가 0건이었는데,
+    // fetch 는 매번 성공하니 last_status 는 계속 ok 였다 — 조용히 죽은 소스가 된다.
+    // "최신순은 점수가 0" 과 "점수순은 시간이 없다" 를 둘 다 피하려면
+    // search_by_date + numericFilters=points>30 처럼 **최신순에 점수 하한**을 거는 조합을 쓴다.
     .filter((h: Record<string, unknown>) => (Number(h.points) || 0) >= 3)
     .slice(0, limit)
     .map((h: Record<string, unknown>) => ({
