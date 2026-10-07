@@ -12,7 +12,7 @@
 // 3) IPO·대출·인수·기업가치가 라운드 금액에 섞인다. → funding_stage 로 VC 라운드만 집계(VC_STAGES).
 //    금액은 고정 환율 USD 환산 근사치다(_shared/funding.js).
 
-import { kstDayKey } from './today'
+import { kstDayKey } from './today.js'
 
 // 검증 시드(로컬 스크립트·위키데이터)로 들어온 행은 "보도 흐름"이 아니라 일부러 고른 대기업이다.
 export const SEED_SOURCES = new Set(['DART 전자공시 검증', 'Wikidata 검증'])
