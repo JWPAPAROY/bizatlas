@@ -77,6 +77,8 @@ const base = rows.filter((r) => monthKey(r.created_at) < target)
 const baseMonths = [...new Set(base.map((r) => monthKey(r.created_at)))].sort()
 if (!cur.length) { console.error(`${target} 데이터 없음`); process.exit(0) }
 
+const usd = (v) => v == null ? '—' : v >= 1000 ? `$${(v / 1000).toFixed(1)}B` : v >= 10 ? `$${Math.round(v)}M` : `$${v.toFixed(1)}M`
+
 const z = (p1, n1, p2, n2) => {
   const p = (p1 * n1 + p2 * n2) / (n1 + n2)
   const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2))
@@ -162,6 +164,25 @@ const facts = {
   falling_tags: tagsDown.map((x) => ({ tag: x.t, now: x.n, was: x.was })),
 }
 
+// 모델에 넘기는 사실은 한국어 키로. 영문 필드명(reliable·n_now…)을 주면 해설에 그대로 새어 나온다(실측).
+const factsKo = {
+  보고월: target,
+  비교기준월: baseMonths,
+  신규건수: facts.new_items,
+  분야비중변화_소스보정_유의한것만: facts.category_shifts_mix_adjusted.map((x) => ({ 분야: x.category, 이번달: `${x.now_pct}%`, 기준: `${x.was_pct}%` })),
+  고객유형변화: facts.customer_type_shifts.map((x) => ({ 유형: x.type, 이번달: `${x.now_pct}%`, 기준: `${x.was_pct}%` })),
+  소스구성변화: facts.source_mix_changes.map((x) => ({ 소스: x.source, 이번달: `${x.now_pct}%`, 기준: `${x.was_pct}%`, 신규소스: x.new_source ? '예' : '아니오' })),
+  지역비중_보정불가: facts.region_raw_not_adjustable.map((x) => ({ 지역: x.region, 이번달: `${x.now_pct}%`, 기준: x.was_pct == null ? '없음' : `${x.was_pct}%` })),
+  라운드중앙값: rounds.filter((x) => x.n).map((x) => ({
+    단계: STAGE_LABEL[x.s], 이번달: usd(x.now), 기준: usd(x.was), 표본: x.reliable ? '충분' : '부족',
+  })),
+  상승태그: facts.rising_tags.map((x) => `${x.tag} ${x.was}→${x.now}건`),
+  하락태그: facts.falling_tags.map((x) => `${x.tag} ${x.was}→${x.now}건`),
+}
+
+// 필드명·내부 용어·표본 수·LaTeX 가 새어 나온 불릿은 버린다 (실측으로 본 유형들)
+const LEAK = /[a-z]+_[a-z_]+|reliable|\btrue\b|\bfalse\b|JSON|n\s?=\s?\d|%\$|\$\d[\d.]*%|보정불가|유의한것만/i
+
 async function commentary() {
   const key = process.env.GEMINI_API_KEY
   if (!key) return null
@@ -182,7 +203,8 @@ async function commentary() {
 - round_size_medians 에서 reliable=false 인 항목은 "표본이 작다"고 밝히거나 언급하지 마세요.
 - 이것은 시장 전체가 아니라 보도량입니다. "시장이 ~했다" 대신 "보도된 ~가" 같은 표현을 쓰세요.
 - 변화가 거의 없으면 그렇다고 짧게 쓰세요. 억지로 동향을 만들지 마세요.
-- 금액은 "$5.0M", "$16M" 처럼 쓰세요("백만 달러" 금지).
+- 금액은 주어진 표기("$5.0M", "$16M")를 그대로 쓰세요. 퍼센트는 "50%"처럼 평문으로.
+- 입력의 키 이름이나 표본 수를 문장에 옮기지 마세요. 표본이 "부족"이면 "표본이 작다"고만 쓰세요.
 - 각 불릿은 한 문장, "• "로 시작. 다른 텍스트 없이 불릿만 출력.`
   // 사고하지 않는 가벼운 모델 우선. 사고형 모델은 출력 한도를 넉넉히(사고 토큰도 한도에서 깎인다).
   for (const model of ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-flash-latest']) {
@@ -193,22 +215,21 @@ async function commentary() {
         headers: { 'Content-Type': 'application/json', 'X-goog-api-key': key },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: system }] },
-          contents: [{ role: 'user', parts: [{ text: JSON.stringify(facts) }] }],
+          contents: [{ role: 'user', parts: [{ text: JSON.stringify(factsKo, null, 1) }] }],
           generationConfig: { maxOutputTokens: 8192, temperature: 0.2 },
         }),
       })
       if (!res.ok) { await res.text(); continue }
       const data = await res.json()
       const text = (data?.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('').trim()
-      const bullets = text.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('•'))
-      if (bullets.length) return bullets.slice(0, 5)
+      const bullets = text.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('•') && !LEAK.test(l))
+      if (bullets.length >= 2) return bullets.slice(0, 5)
     } catch { /* 다음 모델 */ }
   }
   return null
 }
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-const usd = (v) => v == null ? '—' : v >= 1000 ? `$${(v / 1000).toFixed(1)}B` : v >= 10 ? `$${Math.round(v)}M` : `$${v.toFixed(1)}M`
 const pp = (d) => `${d >= 0 ? '+' : ''}${d.toFixed(1)}%p`
 const mLabel = (k) => `${Number(k.slice(5))}월`
 
