@@ -189,6 +189,7 @@ node scripts/enrich-decision.mjs   # 아직 판단 층이 없는 것만
 | 이상 감지 (`healthcheck.mjs`) → 실패 시 텔레그램 | GitHub Actions `health.yml` | 매일 09:10 KST |
 | 주간 보고 (`weekly-report.mjs`) → 텔레그램 | GitHub Actions `weekly.yml` | 매주 월 09:30 KST |
 | 월간 보고 (`monthly-report.mjs`) → 텔레그램 | GitHub Actions `monthly.yml` | 매월 1일 09:40 KST |
+| 예약 워크플로 비활성 방지 (60일 규칙) | GitHub Actions `keepalive.yml` | 매월 1·15일 12:00 KST |
 | 배포 | GitHub Actions `deploy.yml` | `main` 푸시 시 |
 
 > ### ⚠️ 2026-09-18 ~ 10-07: maintain 이 19일간 한 건도 못 채웠다

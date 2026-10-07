@@ -1,0 +1,32 @@
+name: Keepalive
+
+# GitHub 는 60일간 커밋이 없는 repo 의 예약 워크플로를 자동으로 끈다.
+# 그러면 헬스체크·주간·월간 보고가 조용히 멈춘다 — 알림이 멈췄다는 알림은 오지 않는다.
+#
+# 빈 커밋 대신 API 로 각 워크플로를 다시 "enable" 해 비활성 카운터를 리셋한다.
+# 커밋 방식은 main 푸시마다 배포(deploy.yml)를 헛돌리고 기록을 더럽힌다.
+# 이 워크플로 자신도 목록에 넣어 함께 살린다.
+
+on:
+  schedule:
+    # 매월 1일·15일 12:00 KST (03:00 UTC). 60일 한도에 비해 넉넉한 간격.
+    - cron: '0 3 1,15 * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 예약 워크플로 재활성화
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          for wf in health.yml weekly.yml monthly.yml keepalive.yml; do
+            gh workflow enable "$wf" -R "$REPO"
+            echo "$wf: $(gh api "repos/$REPO/actions/workflows/$wf" --jq .state)"
+          done
