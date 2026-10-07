@@ -65,7 +65,7 @@ function extractJson(text) {
   return null
 }
 
-async function gemini(system, user, maxTokens = 2048) {
+async function gemini(system, user, maxTokens = 8192) {
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [{ text: user }] }],

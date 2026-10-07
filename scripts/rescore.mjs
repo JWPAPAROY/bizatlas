@@ -101,7 +101,7 @@ async function gemini(user) {
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: SYSTEM }] },
     contents: [{ role: 'user', parts: [{ text: user }] }],
-    generationConfig: { maxOutputTokens: 1024, temperature: 0.3, responseMimeType: 'application/json' },
+    generationConfig: { maxOutputTokens: 8192, temperature: 0.3, responseMimeType: 'application/json' },
   })
   let attempts = 0
   while (modelIndex < MODELS.length && attempts < MODELS.length + 2) {

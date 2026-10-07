@@ -183,9 +183,21 @@ node scripts/enrich-decision.mjs   # 아직 판단 층이 없는 것만
 | 무엇 | 어디서 | 언제 |
 |---|---|---|
 | 수집 (`ingest`) | Supabase pg_cron `bizatlas-ingest` | 4시간마다 (KST 01/05/09/13/17/21시) |
-| 재평가 · 판단 층 · 승격 (`maintain`) | Supabase pg_cron `bizatlas-maintain` | 매일 17:30 KST |
+| 재평가 · 판단 층 · 승격 (`maintain`) | Supabase pg_cron `bizatlas-maintain` | 매일 17:30 · 23:30 KST |
 | 이상 감지 (`healthcheck.mjs`) | GitHub Actions `health.yml` | 매일 09:10 KST |
 | 배포 | GitHub Actions `deploy.yml` | `main` 푸시 시 |
+
+> ### ⚠️ 2026-09-18 ~ 10-07: maintain 이 19일간 한 건도 못 채웠다
+>
+> 증상: 헬스체크가 12일 연속 실패("3일 넘게 미처리 234건"), pg_cron 은 계속 `succeeded`.
+> 원인 사슬: 1순위 모델 503 → 2순위 **사고형 모델**(gemini-3-flash-preview)로 폴백 → 이 모델은 **사고 토큰도
+> `maxOutputTokens` 에서 깎아** 한도 1024 에서 본문이 비고(`finishReason=MAX_TOKENS`) JSON 파싱 실패 →
+> 호출에 타임아웃이 없어 150초를 넘기고 `WORKER_RESOURCE_LIMIT`(546) 로 함수째 사망 →
+> 실패 표시가 없어 다음 날 **같은 맨 앞 행**을 또 뽑음.
+> 수정: 전 파이프라인 `maxOutputTokens` 8192 · 호출당 40초 타임아웃(넘기면 다음 모델) ·
+> `maint_attempts` 로 실패 행을 뒤로 · cron 하루 2회(하루 신규 ~15건 × 2호출 = 30 > 1회 상한 24).
+> **교훈:** `thinkingConfig` 는 모델마다 지원이 달라(flash-lite-latest 는 `thinkingBudget` 에 400) 쓰지 말고 한도를 넉넉히.
+> 546 은 "연산 부족"이라고 쓰여 있지만 실제로는 **응답 대기 중 벽시계 초과**였다.
 
 `maintain` 은 원래 로컬 예약 작업이었으나 **2026-08-11 에 엣지 함수로 옮겼다**
 (`scripts/rescore.mjs`·`enrich-decision.mjs` 는 fetch 만 쓰므로 Deno 에서 그대로 돈다).

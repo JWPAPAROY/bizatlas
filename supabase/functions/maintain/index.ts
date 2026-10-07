@@ -32,6 +32,15 @@ const MAX_AI_CALLS = 24
 const CONCURRENCY = 3
 const CALL_SPACING_MS = 2_000
 
+// 출력 한도는 넉넉히. 폴백 체인의 사고형 모델(gemini-3-flash-preview·3.5-flash)은 **사고 토큰도
+// maxOutputTokens 에서 깎는다** — 짧은 채점 질문에도 400~800 토큰을 생각에 쓰고, 한도가 1024 면
+// 본문이 비어(finishReason=MAX_TOKENS) JSON 파싱 실패가 난다. 실측 2026-10-07: 1순위 모델이 503 을
+// 내면서 2순위 사고형 모델로 넘어갔고, maintain 이 9/18 부터 한 건도 못 채웠다.
+// thinkingConfig 는 모델마다 지원이 달라(flash-lite-latest 는 thinkingBudget 에 400) 쓰지 않는다.
+const MAX_OUTPUT_TOKENS = 8192
+// 호출 하나가 함수 전체(150초)를 잡아먹지 않게. 넘기면 그 모델을 건너뛴다.
+const CALL_TIMEOUT_MS = 40_000
+
 let modelIndex = 0
 let nextSlotAt = 0
 
@@ -60,18 +69,27 @@ async function gemini(apiKey: string, system: string, user: string, maxTokens: n
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [{ text: user }] }],
-    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3, responseMimeType: 'application/json' },
+    generationConfig: { maxOutputTokens: Math.max(maxTokens, MAX_OUTPUT_TOKENS), temperature: 0.3, responseMimeType: 'application/json' },
   })
   let attempts = 0
   while (modelIndex < GEMINI_MODELS.length && attempts < GEMINI_MODELS.length + 2) {
     attempts++
     const model = GEMINI_MODELS[modelIndex]
     await acquireSlot()
-    const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
-      body,
-    })
+    let res: Response
+    try {
+      res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
+        body,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      })
+    } catch {
+      // 타임아웃·네트워크 오류 — 5xx 와 같이 다음 모델로
+      if (GEMINI_MODELS.indexOf(model) === modelIndex) modelIndex++
+      if (modelIndex >= GEMINI_MODELS.length) throw new Error('QUOTA')
+      continue
+    }
     if (res.status === 429 || res.status === 404 || res.status >= 500) {
       await res.text()
       if (GEMINI_MODELS.indexOf(model) === modelIndex) modelIndex++
@@ -223,6 +241,9 @@ Deno.serve(async (req) => {
           if (msg === 'QUOTA') { quotaHalted = true; return }
           log.failed++
           if (errors.length < 5) errors.push(`${b.name}: ${msg}`)
+          // 실패 횟수를 남겨 다음 실행에서 뒤로 보낸다 (마이그레이션 20261007010000 참조)
+          await supabase.from('businesses')
+            .update({ maint_attempts: (b.maint_attempts ?? 0) + 1 }).eq('id', b.id)
         }
       }
     }
@@ -233,9 +254,9 @@ Deno.serve(async (req) => {
   if (wantRescore > 0) {
     const { data: rows } = await supabase
       .from('businesses')
-      .select('id, name, category, customer_type, revenue_models, one_liner, description, why_it_works')
+      .select('id, name, category, customer_type, revenue_models, one_liner, description, why_it_works, maint_attempts')
       .is('scored_at', null).eq('status', 'published')
-      .order('created_at', { ascending: true }).limit(wantRescore)
+      .order('maint_attempts', { ascending: true }).order('created_at', { ascending: true }).limit(wantRescore)
 
     await runPool(rows ?? [], async (b) => {
       const p = await gemini(geminiKey, SCORE_SYSTEM, subject(b), 1024)
@@ -261,8 +282,9 @@ Deno.serve(async (req) => {
   if (wantEnrich > 0 && budgetLeft()) {
     const { data: rows } = await supabase
       .from('businesses')
-      .select('id, name, category, customer_type, revenue_models, one_liner, description, why_it_works, capital_intensity')
+      .select('id, name, category, customer_type, revenue_models, one_liner, description, why_it_works, capital_intensity, maint_attempts')
       .is('decided_at', null).eq('status', 'published')
+      .order('maint_attempts', { ascending: true })
       .order('tier', { ascending: true }).order('created_at', { ascending: true }).limit(wantEnrich)
 
     await runPool(rows ?? [], async (b) => {

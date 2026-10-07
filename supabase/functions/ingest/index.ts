@@ -446,6 +446,15 @@ function retryDelayMs(body: string): number {
   return m ? Math.ceil(Number(m[1]) * 1000) : CALL_SPACING_MS * 2
 }
 
+// 출력 한도는 넉넉히. 폴백 체인의 사고형 모델(gemini-3-flash-preview·3.5-flash)은 **사고 토큰도
+// maxOutputTokens 에서 깎는다** — 짧은 채점 질문에도 400~800 토큰을 생각에 쓰고, 한도가 1024 면
+// 본문이 비어(finishReason=MAX_TOKENS) JSON 파싱 실패가 난다. 실측 2026-10-07: 1순위 모델이 503 을
+// 내면서 2순위 사고형 모델로 넘어갔고, maintain 이 9/18 부터 한 건도 못 채웠다.
+// thinkingConfig 는 모델마다 지원이 달라(flash-lite-latest 는 thinkingBudget 에 400) 쓰지 않는다.
+const MAX_OUTPUT_TOKENS = 8192
+// 호출 하나가 함수 전체(150초)를 잡아먹지 않게. 넘기면 그 모델을 건너뛴다.
+const CALL_TIMEOUT_MS = 40_000
+
 async function structureOne(
   apiKey: string,
   systemPrompt: string,
@@ -461,18 +470,29 @@ async function structureOne(
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: systemPrompt }] },
     contents: [{ role: 'user', parts: [{ text: userContent }] }],
-    generationConfig: { maxOutputTokens: 2048, temperature: 0.3, responseMimeType: 'application/json' },
+    generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS, temperature: 0.3, responseMimeType: 'application/json' },
   })
 
   // 429 = 그 모델의 하루치가 끝났다는 뜻이다(대기해도 안 풀린다). 다음 모델로 넘어간다.
   while (modelIndex < GEMINI_MODELS.length) {
     const model = GEMINI_MODELS[modelIndex]
     await acquireSlot()
-    const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
-      body,
-    })
+    let res: Response
+    try {
+      res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
+        body,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      })
+    } catch {
+      // 타임아웃·네트워크 오류 — 5xx 와 같이 다음 모델로
+      if (GEMINI_MODELS.indexOf(model) === modelIndex) modelIndex++
+      if (modelIndex >= GEMINI_MODELS.length) {
+        throw new Error(`Gemini 쿼터 소진 (모델 ${GEMINI_MODELS.length}개 전부) — 다음 실행으로 이월`)
+      }
+      continue
+    }
 
     // 429 = 그 모델의 하루치 소진, 5xx = 일시적 과부하(HTTP 503 "high demand").
     // 어느 쪽이든 그 모델을 붙잡고 기다릴 이유가 없으니 다음 모델로 넘어간다.

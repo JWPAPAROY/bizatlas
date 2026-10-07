@@ -80,7 +80,12 @@ function extractJson(text: string): Record<string, unknown> | null {
   return null
 }
 
-async function gemini(apiKey: string, system: string, user: string, maxTokens = 2048) {
+// 사고형 모델은 사고 토큰도 maxOutputTokens 에서 깎는다 — 한도가 작으면 본문이 비어 파싱 실패.
+// (자세한 경위는 maintain/index.ts 의 MAX_OUTPUT_TOKENS 주석)
+const MAX_OUTPUT_TOKENS = 8192
+const CALL_TIMEOUT_MS = 40_000
+
+async function gemini(apiKey: string, system: string, user: string, maxTokens = MAX_OUTPUT_TOKENS) {
   const body = JSON.stringify({
     system_instruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [{ text: user }] }],
@@ -92,11 +97,19 @@ async function gemini(apiKey: string, system: string, user: string, maxTokens = 
     attempts++
     const model = GEMINI_MODELS[modelIndex]
     await acquireSlot()
-    const res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
-      body,
-    })
+    let res: Response
+    try {
+      res = await fetch(`${GEMINI_URL}/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-goog-api-key': apiKey },
+        body,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      })
+    } catch {
+      if (GEMINI_MODELS.indexOf(model) === modelIndex) modelIndex++
+      if (modelIndex >= GEMINI_MODELS.length) throw new Error('Gemini 전 모델 사용 불가 (타임아웃)')
+      continue
+    }
     // 429 = 그 모델의 하루치 소진, 5xx = 일시적 과부하. 둘 다 기다려도 소용없으니 다음 모델로.
     // 404 = 그 모델이 퇴역함(2026-08 gemini-2.0-* 가 이렇게 사라졌다). 429·5xx 와 마찬가지로
     // 기다려도 회복되지 않으므로 다음 모델로 넘긴다. 여기서 안 걸러주면 체인이 죽은 모델에
