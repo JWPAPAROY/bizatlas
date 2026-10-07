@@ -65,13 +65,23 @@ const median = (xs) => {
 }
 const usd = (v) => v == null ? '—' : v >= 1000 ? `$${(v / 1000).toFixed(1)}B` : v >= 10 ? `$${Math.round(v)}M` : `$${v.toFixed(1)}M`
 
-const [taxonomy, rows, runs] = await Promise.all([
+const [taxonomy, rows, runs, roundRows] = await Promise.all([
   sb('taxonomy?select=kind,value,label_ko'),
   sb(`businesses?select=name,slug,category,region,tier,source_name,funding_usd_m,funding_stage,tags,created_at,scored_at,decided_at` +
      `&status=eq.published&created_at=gte.${new Date(baseStart).toISOString()}`),
   sb(`ingest_runs?select=started_at,finished_at,created,failed,detail` +
      `&started_at=gte.${new Date(weekStart).toISOString()}&started_at=lt.${new Date(weekEnd).toISOString()}`),
+  sb(`funding_rounds?select=stage,usd_m,source_name,reported_at,businesses(name,slug,category,region)` +
+     `&reported_at=gte.${new Date(weekStart).toISOString()}&reported_at=lt.${new Date(weekEnd).toISOString()}`),
 ])
+
+// 투자는 funding_rounds(회사 1 : 라운드 N) 기준 — 같은 회사의 후속 라운드도 잡힌다.
+// 위 집계용 행 모양(funding_usd_m·funding_stage·created_at…)으로 맞춰 둔다.
+const toRound = (r) => ({
+  funding_stage: r.stage, funding_usd_m: r.usd_m, source_name: r.source_name, created_at: r.reported_at,
+  name: r.businesses?.name, slug: r.businesses?.slug, category: r.businesses?.category ?? 'other', region: r.businesses?.region ?? null,
+})
+const weekRounds = roundRows.map(toRound).filter((r) => !SEED_SOURCES.has(r.source_name))
 const label = (kind, v) => taxonomy.find((t) => t.kind === kind && t.value === v)?.label_ko ?? v
 
 const feed = rows.filter((r) => !SEED_SOURCES.has(r.source_name))
@@ -108,7 +118,7 @@ const regions = [...new Set(week.map((r) => r.region ?? 'unknown'))]
 lines.push(`🌍 ${regions.map(([g, n]) => `${esc(REGION_LABEL[g] ?? (g === 'unknown' ? '미상' : g))} ${n}`).join(' · ')}`)
 
 // ── 투자
-const vc = week.filter((r) => r.funding_usd_m != null && VC_STAGES.includes(r.funding_stage))
+const vc = weekRounds.filter((r) => r.funding_usd_m != null && VC_STAGES.includes(r.funding_stage))
 lines.push('')
 lines.push(`💰 <b>VC 라운드 ${vc.length}건</b> (금액 확인분)`)
 const stMed = ['seed', 'series_a', 'series_b']

@@ -1,4 +1,4 @@
-// 트렌드 층 백필 — 투자 라운드 구조화 + 태그 표기 정규화. **AI 호출 0회.**
+// 트렌드 층 백필 — 투자 라운드 구조화(businesses + funding_rounds) + 태그 표기 정규화. **AI 호출 0회.**
 //
 // 신규 수집분은 ingest 가 저장 직전에 같은 규칙(_shared/funding.js · _shared/tags.js)을 적용한다.
 // 이 스크립트가 필요한 경우:
@@ -128,3 +128,21 @@ for (let i = 0; i < updates.length; i += 8) {
   done += Math.min(8, updates.length - i)
 }
 console.log(`businesses ${done}건 갱신 완료`)
+
+// ── 4) 투자 라운드 테이블도 같은 파서로 재계산 (funding_rounds.raw → stage·usd_m)
+const rounds = []
+for (let from = 0; ; from += 1000) {
+  const page = await sb('funding_rounds?select=id,raw,stage,usd_m&order=id', { headers: { Range: `${from}-${from + 999}` } })
+  rounds.push(...page)
+  if (page.length < 1000) break
+}
+const rUpd = rounds
+  .map((r) => [r, parseFunding(r.raw)])
+  .filter(([r, f]) => f.stage !== r.stage || f.usd_m !== (r.usd_m == null ? null : Number(r.usd_m)))
+for (let i = 0; i < rUpd.length; i += 8) {
+  await Promise.all(rUpd.slice(i, i + 8).map(([r, f]) =>
+    sb(`funding_rounds?id=eq.${r.id}`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ stage: f.stage, usd_m: f.usd_m }),
+    })))
+}
+console.log(`funding_rounds ${rUpd.length}/${rounds.length}건 갱신 완료`)

@@ -155,3 +155,21 @@ export function risingTags(rows, windowDays = 30, minRecent = 5) {
     .sort((a, b) => b.lift - a.lift)
   return { recentN: recent.length, beforeN: before.length, items }
 }
+
+// ── 투자 라운드 행 → 위 집계 함수들이 받는 모양으로.
+// 라운드는 funding_rounds(회사 1 : 라운드 N)에서 온다. 회사 행의 funding_* 는 "최신 라운드" 하나뿐이라
+// 시계열·중앙값에 쓰면 같은 회사의 이전 라운드가 빠진다. 시간축은 보도 시각(reported_at).
+// 기대 입력: funding_rounds?select=stage,usd_m,source_name,reported_at,businesses(category,region)
+export function roundsToRows(rounds) {
+  return rounds
+    .filter((r) => !SEED_SOURCES.has(r.source_name))
+    .map((r) => ({
+      funding_stage: r.stage,
+      funding_usd_m: r.usd_m,
+      source_name: r.source_name,
+      created_at: r.reported_at,
+      category: r.businesses?.category ?? 'other',
+      region: r.businesses?.region ?? null,
+    }))
+}
+export const ROUND_COLS = 'stage, usd_m, source_name, reported_at, businesses(category, region)'

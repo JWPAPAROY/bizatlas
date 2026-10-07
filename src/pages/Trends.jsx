@@ -4,7 +4,7 @@ import { Loader2, AlertTriangle, Info } from 'lucide-react'
 import { supabase, isConfigured } from '../lib/supabase'
 import { useStore } from '../lib/store.jsx'
 import {
-  SEED_SOURCES, STAGE_LABEL, REGION_GROUPS, MIN_MONTH_N, THIN_CELL_N,
+  SEED_SOURCES, STAGE_LABEL, ROUND_COLS, roundsToRows, REGION_GROUPS, MIN_MONTH_N, THIN_CELL_N,
   fmtUsdM, stageRegionMedians, categoryMedians, monthlyShares, risingTags,
 } from '../lib/trends'
 
@@ -226,6 +226,7 @@ function RisingTags({ rows }) {
 
 export default function Trends() {
   const [rows, setRows] = useState([])
+  const [rounds, setRounds] = useState([])   // 투자 라운드 (회사 1 : 라운드 N) — 금액 집계는 이쪽
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -237,28 +238,37 @@ export default function Trends() {
     }
     ;(async () => {
       // PostgREST 1회 상한(1000) 때문에 페이지로 받는다. 필요한 열만 — 전체 행은 4MB 가 넘는다.
-      const all = []
-      for (let from = 0; ; from += 1000) {
-        const { data, error: e } = await supabase
-          .from('businesses').select(COLS).eq('status', 'published')
-          .order('created_at').range(from, from + 999)
-        if (e) { setError(e.message); break }
-        all.push(...data)
-        if (data.length < 1000) break
+      const fetchAll = async (build) => {
+        const all = []
+        for (let from = 0; ; from += 1000) {
+          const { data, error: e } = await build().range(from, from + 999)
+          if (e) throw e
+          all.push(...data)
+          if (data.length < 1000) return all
+        }
       }
-      setRows(all.filter((r) => !SEED_SOURCES.has(r.source_name)))
+      try {
+        const [biz, rnd] = await Promise.all([
+          fetchAll(() => supabase.from('businesses').select(COLS).eq('status', 'published').order('created_at')),
+          fetchAll(() => supabase.from('funding_rounds').select(ROUND_COLS).order('reported_at')),
+        ])
+        setRows(biz.filter((r) => !SEED_SOURCES.has(r.source_name)))
+        setRounds(roundsToRows(rnd))
+      } catch (e) {
+        setError(e.message)
+      }
       setLoading(false)
     })()
   }, [])
 
-  const funded = rows.filter((r) => r.funding_usd_m != null).length
+  const funded = rounds.filter((r) => r.funding_usd_m != null).length
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <header className="mb-5">
         <h1 className="text-xl font-bold tracking-tight">투자 흐름</h1>
         <p className="mt-1 text-sm text-ink-600">
-          자동 수집한 {rows.length.toLocaleString()}건(금액 확인 {funded.toLocaleString()}건)을 같은 축으로 집계했습니다.
+          자동 수집한 {rows.length.toLocaleString()}건과 투자 라운드 {rounds.length.toLocaleString()}건(금액 확인 {funded.toLocaleString()}건)을 같은 축으로 집계했습니다.
         </p>
       </header>
 
@@ -269,7 +279,7 @@ export default function Trends() {
           <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px]">
             <li>소스는 TechCrunch·Tech.eu·EU-Startups·e27·TechNode·YC 등 10곳이고, 유럽 매체 비중이 큽니다.</li>
             <li>금액은 기사에 적힌 숫자를 고정 환율로 달러 환산한 근사치입니다. IPO·대출·인수·보조금은 라운드 집계에서 뺍니다.</li>
-            <li>같은 회사가 나중에 또 투자받아도 처음 들어온 기사 하나만 남습니다(회사 단위 중복 제거).</li>
+            <li>투자 금액은 라운드 단위로 셉니다. 같은 회사의 후속 라운드도 따로 잡히고, 같은 라운드를 여러 매체가 보도하면 하나로 합칩니다(2026-10-07부터).</li>
             <li>위키데이터·DART로 검증해 일부러 넣은 대기업 시드는 제외했습니다.</li>
           </ul>
         </div>
@@ -287,7 +297,7 @@ export default function Trends() {
             title="단계별 라운드 크기 — 지역 비교"
             desc="각 칸은 그 단계·지역 라운드 금액의 중앙값입니다. 5건 미만이면 표시하지 않고, 15건 미만이면 흐리게 표시합니다."
           >
-            <StageTable rows={rows} />
+            <StageTable rows={rounds} />
           </Section>
 
           <div className="grid gap-6 lg:grid-cols-2">
@@ -295,7 +305,7 @@ export default function Trends() {
               title="분야별 라운드 중앙값"
               desc="VC 라운드와 단계가 적히지 않은 투자 금액을 합쳐 계산했습니다. 8건 이상인 분야만 표시합니다. 중앙값이라 메가딜 몇 건에 끌려가지 않습니다."
             >
-              <CategoryBars rows={rows} />
+              <CategoryBars rows={rounds} />
             </Section>
 
             <Section title="떠오르는 태그" desc="최근 30일에 이전보다 자주 붙은 키워드입니다.">

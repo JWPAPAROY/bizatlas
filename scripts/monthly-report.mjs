@@ -63,12 +63,21 @@ async function sb(path) {
 }
 
 const iso = (t) => new Date(t).toISOString()
-const [taxonomy, all, runs] = await Promise.all([
+const [taxonomy, all, runs, roundRows] = await Promise.all([
   sb('taxonomy?select=kind,value,label_ko'),
   sb(`businesses?select=name,slug,category,region,customer_type,source_name,funding_usd_m,funding_stage,tags,created_at` +
      `&status=eq.published&created_at=gte.${iso(bStart)}&created_at=lt.${iso(tEnd)}`),
   sb(`ingest_runs?select=started_at,finished_at,created,failed&started_at=gte.${iso(tStart)}&started_at=lt.${iso(tEnd)}`),
+  sb(`funding_rounds?select=stage,usd_m,source_name,reported_at,businesses(name,slug,category,region)&reported_at=gte.${iso(bStart)}&reported_at=lt.${iso(tEnd)}`),
 ])
+
+// 투자는 funding_rounds(회사 1 : 라운드 N) 기준 — 같은 회사의 후속 라운드도 잡힌다.
+// 위 집계용 행 모양(funding_usd_m·funding_stage·created_at…)으로 맞춰 둔다.
+const toRound = (r) => ({
+  funding_stage: r.stage, funding_usd_m: r.usd_m, source_name: r.source_name, created_at: r.reported_at,
+  name: r.businesses?.name, slug: r.businesses?.slug, category: r.businesses?.category ?? 'other', region: r.businesses?.region ?? null,
+})
+const allRounds = roundRows.map(toRound).filter((r) => !SEED_SOURCES.has(r.source_name))
 const label = (kind, v) => taxonomy.find((t) => t.kind === kind && t.value === v)?.label_ko ?? v
 
 const rows = all.filter((r) => !SEED_SOURCES.has(r.source_name))
@@ -124,8 +133,9 @@ const regions = [...rc].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([g, n]) => 
 }))
 
 // ── 4) 라운드 크기 — 단계별 중앙값. 표본 15건 미만은 "참고"로만
-const vcCur = cur.filter((r) => r.funding_usd_m != null && VC_STAGES.includes(r.funding_stage))
-const vcBase = base.filter((r) => r.funding_usd_m != null && VC_STAGES.includes(r.funding_stage))
+const isVc = (r) => r.funding_usd_m != null && VC_STAGES.includes(r.funding_stage)
+const vcCur = allRounds.filter((r) => isVc(r) && monthKey(r.created_at) === target)
+const vcBase = allRounds.filter((r) => isVc(r) && monthKey(r.created_at) < target)
 const rounds = Object.keys(STAGE_LABEL).map((s) => {
   const a = vcCur.filter((r) => r.funding_stage === s).map((r) => Number(r.funding_usd_m))
   const b = vcBase.filter((r) => r.funding_stage === s).map((r) => Number(r.funding_usd_m))

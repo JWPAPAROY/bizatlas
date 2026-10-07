@@ -646,7 +646,7 @@ Deno.serve(async (req) => {
 
   let fetched = 0, created = 0, skipped = 0, failed = 0, aiCalls = 0
   const errorSamples: string[] = []   // 실패 원인 진단용 샘플
-  const detail: Record<string, { fetched: number; created: number; skipped: number; failed: number; error: string | null }> = {}
+  const detail: Record<string, { fetched: number; created: number; skipped: number; failed: number; error: string | null; rounds?: number }> = {}
   const logOf = (name: string) =>
     (detail[name] ??= { fetched: 0, created: 0, skipped: 0, failed: 0, error: null })
 
@@ -753,21 +753,42 @@ Deno.serve(async (req) => {
           continue
         }
 
-        const { error: insErr } = await supabase.from('businesses').insert(row)
+        // 투자 라운드는 회사와 따로 funding_rounds 에 쌓는다 (회사 1 : 라운드 N).
+        // 중복 판정·회사 카드 갱신은 DB 함수 record_funding_round 가 한다(마이그레이션 20261007020000).
+        const fundingRaw = typeof row.traction?.funding === 'string' ? row.traction.funding : ''
+        const recordRound = async (target: { p_business_id?: string; p_name?: string }) => {
+          if (!fundingRaw.trim()) return 'no_funding'
+          const { data, error } = await supabase.rpc('record_funding_round', {
+            p_raw: fundingRaw, p_stage: row.funding_stage, p_usd_m: row.funding_usd_m,
+            p_source_name: row.source_name, p_source_url: row.source_url,
+            p_source_item_id: row.source_item_id, p_reported_at: new Date().toISOString(),
+            ...target,
+          })
+          // 라운드 기록 실패가 회사 수집을 실패시키면 안 된다 — 로그만 남긴다
+          if (error && errorSamples.length < 5) errorSamples.push(`[${src.name}] 라운드 기록 실패: ${error.message}`)
+          return error ? 'error' : String(data)
+        }
+
+        const { data: inserted, error: insErr } = await supabase.from('businesses').insert(row).select('id').single()
         if (insErr) {
           // 23505 = canonical_key 중복. 같은 회사가 다른 기사로 또 들어온 정상 상황이다
           // (제품 출시 기사를 회사명으로 정규화하면 특히 자주 일어난다).
           // 에러로 올리면 재시도 예산만 축내므로 여기서 반려로 확정한다.
+          // 단 **투자 기사면 라운드는 살린다** — 예전엔 두 번째 라운드가 여기서 통째로 버려졌다.
           if (insErr.code === '23505') {
+            const r = await recordRound({ p_name: row.name })
+            if (r === 'inserted') log.rounds = (log.rounds ?? 0) + 1
             await supabase.from('seen_items').upsert({
               source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,
-              verdict: 'rejected', reason: `이미 등록된 회사 (${row.name})`,
+              verdict: 'rejected',
+              reason: r === 'inserted' ? `이미 등록된 회사 — 투자 라운드만 추가 (${row.name})` : `이미 등록된 회사 (${row.name})`,
             })
             log.skipped++; skipped++
             continue
           }
           throw new Error(insErr.message)
         }
+        await recordRound({ p_business_id: inserted.id })
 
         await supabase.from('seen_items').upsert({
           source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url, verdict: 'accepted',
