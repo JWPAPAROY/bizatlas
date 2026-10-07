@@ -109,10 +109,33 @@ try {
 console.log('── BizAtlas 상태 ──')
 notes.forEach((n) => console.log('  ·', n))
 
+// 텔레그램 알림. GitHub 실패 메일만으로는 부족했다 — 2026-09-26 부터 12일 연속 실패했는데
+// 아무도 못 봤다(그사이 maintain 이 19일 멈춰 있었다). 토큰이 없으면 조용히 건너뛴다(로컬 실행).
+// investar 와 다른 봇을 쓴다 — 알림이 섞이면 어느 서비스 문제인지 한눈에 안 보인다.
+async function notifyTelegram(lines) {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chat = process.env.TELEGRAM_CHAT_ID
+  if (!token || !chat) return
+  const text = ['🚨 BizAtlas 헬스체크 실패', '', ...lines.map((l) => `✕ ${l}`), '',
+    'https://jwpaparoy.github.io/bizatlas/#/today'].join('\n')
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chat, text, disable_web_page_preview: true }),
+    })
+    if (!res.ok) console.error(`텔레그램 전송 실패 ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  } catch (e) {
+    // 알림 실패가 검사 결과(exit 1)를 덮으면 안 된다
+    console.error(`텔레그램 전송 실패: ${e.message}`)
+  }
+}
+
 if (problems.length) {
   console.log('\n── 문제 ──')
   problems.forEach((p) => console.log('  ✕', p))
   console.log('\n대시보드: https://jwpaparoy.github.io/bizatlas/#/today')
+  await notifyTelegram(problems)
   process.exit(1)
 }
 
