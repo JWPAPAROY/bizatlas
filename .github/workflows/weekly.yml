@@ -1,0 +1,30 @@
+name: Weekly report
+
+# 지난주(월~일, KST) 수집분을 요약해 텔레그램으로 보낸다. 헬스체크와 같은 봇·같은 anon 키.
+# 헬스체크는 "고장 났나", 이건 "무엇이 쌓였나"를 본다.
+
+on:
+  schedule:
+    # 매주 월요일 09:30 KST (월 00:30 UTC). 09:00 KST 수집·09:10 헬스체크 뒤.
+    - cron: '30 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - run: node scripts/weekly-report.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

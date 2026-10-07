@@ -167,6 +167,7 @@ node scripts/seed-korea.mjs fintech 8
 | `enrich-decision.mjs [건수]` | 판단 층 3필드 생성 | 신규 데이터가 쌓인 뒤 |
 | `maintain.ps1` | 위 둘 + 승격 검사를 몰아서 실행 | **앵커 수정 후 전량 재평가할 때만** |
 | `healthcheck.mjs` | 파이프라인 이상 감지 (anon 키만 필요) | GitHub Actions 가 매일 자동 실행 |
+| `weekly-report.mjs` | 지난주 요약 → 텔레그램 (anon 키, 토큰 없으면 콘솔 미리보기) | GitHub Actions 가 매주 월요일 자동 실행 |
 | `backfill-trends.mjs [--dry]` | 투자 라운드 구조화 + 태그 표기 정규화 (**AI 0회**, 멱등) | `_shared/funding.js`·`tags.js` 규칙을 고친 뒤 |
 
 `rescore` 와 `enrich-decision` 은 `scored_at` · `decided_at` 으로 진행 상태를 남겨 **이어서 실행된다.**
@@ -184,7 +185,8 @@ node scripts/enrich-decision.mjs   # 아직 판단 층이 없는 것만
 |---|---|---|
 | 수집 (`ingest`) | Supabase pg_cron `bizatlas-ingest` | 4시간마다 (KST 01/05/09/13/17/21시) |
 | 재평가 · 판단 층 · 승격 (`maintain`) | Supabase pg_cron `bizatlas-maintain` | 매일 17:30 · 23:30 KST |
-| 이상 감지 (`healthcheck.mjs`) | GitHub Actions `health.yml` | 매일 09:10 KST |
+| 이상 감지 (`healthcheck.mjs`) → 실패 시 텔레그램 | GitHub Actions `health.yml` | 매일 09:10 KST |
+| 주간 보고 (`weekly-report.mjs`) → 텔레그램 | GitHub Actions `weekly.yml` | 매주 월 09:30 KST |
 | 배포 | GitHub Actions `deploy.yml` | `main` 푸시 시 |
 
 > ### ⚠️ 2026-09-18 ~ 10-07: maintain 이 19일간 한 건도 못 채웠다
