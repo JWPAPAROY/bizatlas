@@ -67,7 +67,8 @@ export default function Home() {
     [setParams],
   )
 
-  const [query, setQuery] = useState('')       // 입력 중인 값
+  // 입력 중인 값. ?q= 로 들어오면(트렌드 화면의 태그 링크) 그 검색어로 시작한다.
+  const [query, setQuery] = useState(() => params.get('q') ?? '')
   const [sort, setSort] = useState('newest')
   const [rows, setRows] = useState([])
   const [count, setCount] = useState(0)

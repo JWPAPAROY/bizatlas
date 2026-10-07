@@ -11,6 +11,8 @@
 // Secrets: supabase secrets set GEMINI_API_KEY=... INGEST_SECRET=...
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { parseFunding } from '../_shared/funding.js'
+import { normalizeTags } from '../_shared/tags.js'
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
 
@@ -504,6 +506,7 @@ function sanitize(
   vocab: Vocab,
   cand: Candidate,
   src: Record<string, unknown>,
+  tagAliases: Map<string, string>,
 ) {
   const allowed = (kind: string) => new Set((vocab[kind] ?? []).map((t) => t.value))
   const one = (kind: string, v: unknown) => {
@@ -533,6 +536,9 @@ function sanitize(
   if (!name || !oneLiner) return null // NOT NULL 제약 — 없으면 저장 불가
 
   const year = Number(parsed.founded_year)
+  const traction = typeof parsed.traction === 'object' && parsed.traction
+    ? parsed.traction as Record<string, unknown> : {}
+  const funding = parseFunding(traction.funding)
 
   return {
     slug: `${slugify(name)}-${shortHash(cand.sourceItemId)}`,
@@ -559,8 +565,12 @@ function sanitize(
     korea_note: str(parsed.korea_note, 300),
     why_it_works: str(parsed.why_it_works),
     risks: strArr(parsed.risks, 3),
-    tags: strArr(parsed.tags, 6),
-    traction: typeof parsed.traction === 'object' && parsed.traction ? parsed.traction : {},
+    // 표기 변종("AI 에이전트"/"AI에이전트")을 대표 표기로 합친 뒤 자른다. 규칙은 _shared/tags.js.
+    tags: normalizeTags(strArr(parsed.tags, 8), tagAliases).slice(0, 6),
+    traction,
+    // 자유 텍스트 투자 문구 → 금액(USD 환산)·단계. 트렌드 집계용. 규칙은 _shared/funding.js.
+    funding_usd_m: funding.usd_m,
+    funding_stage: funding.stage,
     source_id: src.id,
     source_name: src.name,
     source_url: cand.url || null,
@@ -601,6 +611,15 @@ Deno.serve(async (req) => {
   const vocab: Vocab = {}
   for (const r of vocabRows ?? []) (vocab[r.kind] ??= []).push({ value: r.value, label_ko: r.label_ko })
   const systemPrompt = buildPrompt(vocab)
+
+  // 태그 별칭 (key → 대표 표기). PostgREST 1회 상한이 1000 이라 페이지로 받는다.
+  // 못 받아도 수집은 계속한다 — normalizeTags 가 내장 동의어만으로 동작한다.
+  const tagAliases = new Map<string, string>()
+  for (let from = 0; from < 20000; from += 1000) {
+    const { data: page } = await supabase.from('tag_aliases').select('key, canonical').range(from, from + 999)
+    for (const a of page ?? []) tagAliases.set(a.key, a.canonical)
+    if (!page || page.length < 1000) break
+  }
 
   const { data: sources } = await supabase
     .from('sources').select('*').eq('enabled', true).order('name')
@@ -704,7 +723,7 @@ Deno.serve(async (req) => {
           continue
         }
 
-        const row = sanitize(parsed, vocab, cand, src)
+        const row = sanitize(parsed, vocab, cand, src, tagAliases)
         if (!row) {
           await supabase.from('seen_items').upsert({
             source_item_id: cand.sourceItemId, source_id: src.id, url: cand.url,

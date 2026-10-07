@@ -518,16 +518,29 @@ Deno.serve(async (req) => {
   // 쿼터를 한 건도 쓰지 않는다.
   if (body.mode === 'promote') {
     const limit = Math.min(Number(body.limit) || 40, 100)
+    // 검사 이력(promote_checked_at)이 없는 행부터, 그다음 가장 오래전에 검사한 행 순으로.
+    // 예전에는 created_at 오름차순 상위 N건만 봐서 **매일 같은 60건만 다시 훑었다** —
+    // 그 뒤에 들어온 Alibaba·Tesla·ByteDance 가 두 달간 한 번도 검사받지 못하고 emerging 에 남아
+    // 트렌드 집계(투자 합계)를 혼자 왜곡했다. 실패해도 검사 시각은 남겨서 줄이 돌아가게 한다.
     const { data: rows } = await supabase
       .from('businesses')
       .select('id, name, website, founded_year, source_url')
       .eq('tier', 'emerging').eq('status', 'published')
-      .order('created_at', { ascending: true }).limit(limit)
+      .order('promote_checked_at', { ascending: true, nullsFirst: true })
+      .order('created_at', { ascending: false })
+      .limit(limit)
 
     const plog = { scanned: rows?.length ?? 0, resolved: 0, promoted: 0, failed: 0 }
     const promoted: string[] = []
     const skipped: string[] = []
     const perrors: string[] = []
+
+    // 결과와 무관하게 이번에 훑은 행은 검사 시각을 찍는다 (승격된 행은 아래 update 가 tier 를 바꾼다).
+    const scannedIds = (rows ?? []).map((r: Record<string, unknown>) => r.id)
+    if (scannedIds.length) {
+      await supabase.from('businesses')
+        .update({ promote_checked_at: new Date().toISOString() }).in('id', scannedIds)
+    }
 
     await Promise.all((rows ?? []).map(async (b: Record<string, unknown>) => {
       const name = String(b.name ?? '')
