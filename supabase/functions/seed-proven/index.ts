@@ -122,10 +122,30 @@ async function gemini(apiKey: string, system: string, user: string, maxTokens = 
 // ────────────────────────────────────────────────────────────
 // Wikidata
 // ────────────────────────────────────────────────────────────
+// HTTP 상태 집계. 실패가 null 로 삼켜지면 "엔티티 없음"과 구분이 안 된다 —
+// 승격이 0건일 때 위키데이터가 막은 건지(429/403) 진짜 없는 건지 응답에서 바로 보이게 한다.
+const wdHttp: Record<string, number> = {}
+
 async function wdJson(url: string) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })
-  if (!res.ok) return null
-  return await res.json()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response
+    try {
+      res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })
+    } catch {
+      wdHttp.network = (wdHttp.network ?? 0) + 1
+      return null
+    }
+    wdHttp[res.status] = (wdHttp[res.status] ?? 0) + 1
+    if (res.ok) return await res.json()
+    // 429·5xx 는 잠깐 쉬고 재시도. Retry-After 가 있으면 따른다(최대 5초).
+    if (res.status === 429 || res.status >= 500) {
+      const ra = Number(res.headers.get('retry-after'))
+      await new Promise((r) => setTimeout(r, Math.min(5000, (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 800 * (attempt + 1)))))
+      continue
+    }
+    return null
+  }
+  return null
 }
 
 function claimIds(claims: Record<string, unknown[]>, prop: string): string[] {
@@ -193,6 +213,7 @@ type WdEntity = {
   revenueCurrency: string
   sitelinks: number
   country: string | null
+  countries?: string[]
 }
 
 async function wdEntity(id: string): Promise<WdEntity | null> {
@@ -225,6 +246,7 @@ async function wdEntity(id: string): Promise<WdEntity | null> {
     revenueCurrency: rev?.currency ?? '',
     sitelinks: Object.keys(e.sitelinks ?? {}).length,
     country: claimIds(claims, 'P17')[0] ?? null,
+    countries: claimIds(claims, 'P17'),
   }
 }
 
@@ -351,6 +373,20 @@ function domainOf(url: string | null | undefined): string {
     const h = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.toLowerCase()
     return h.replace(/^www\./, '')
   } catch { return '' }
+}
+
+// ingest 의 hq_country(정규화된 영문 국가명) → 위키데이터 P17 엔티티. 승격 시 동명 회사 판별용.
+// 없는 나라는 비교를 건너뛴다(=통과) — 모르는 것을 불일치로 치지 않는다.
+const COUNTRY_QID: Record<string, string> = {
+  'united states': 'Q30', 'united kingdom': 'Q145', germany: 'Q183', france: 'Q142', china: 'Q148',
+  japan: 'Q17', 'south korea': 'Q884', india: 'Q668', canada: 'Q16', spain: 'Q29', italy: 'Q38',
+  netherlands: 'Q55', sweden: 'Q34', finland: 'Q33', denmark: 'Q35', norway: 'Q20', switzerland: 'Q39',
+  belgium: 'Q31', austria: 'Q40', portugal: 'Q45', poland: 'Q36', estonia: 'Q191', lithuania: 'Q37',
+  latvia: 'Q211', singapore: 'Q334', taiwan: 'Q865', 'hong kong': 'Q8646', israel: 'Q801',
+  australia: 'Q408', brazil: 'Q155', belarus: 'Q184', cyprus: 'Q229', ireland: 'Q27', bulgaria: 'Q219',
+  thailand: 'Q869', indonesia: 'Q252', philippines: 'Q928', vietnam: 'Q881', malaysia: 'Q833',
+  'united arab emirates': 'Q878', mexico: 'Q96', ukraine: 'Q212', romania: 'Q218', czechia: 'Q213',
+  'czech republic': 'Q213', greece: 'Q41', turkey: 'Q43', croatia: 'Q224', serbia: 'Q403', hungary: 'Q28',
 }
 
 type Gate = { pass: boolean; ageYears: number | null; scale: string | null; reasons: string[] }
@@ -524,7 +560,7 @@ Deno.serve(async (req) => {
     // 트렌드 집계(투자 합계)를 혼자 왜곡했다. 실패해도 검사 시각은 남겨서 줄이 돌아가게 한다.
     const { data: rows } = await supabase
       .from('businesses')
-      .select('id, name, website, founded_year, source_url')
+      .select('id, name, website, founded_year, source_url, hq_country')
       .eq('tier', 'emerging').eq('status', 'published')
       .order('promote_checked_at', { ascending: true, nullsFirst: true })
       .order('created_at', { ascending: false })
@@ -542,7 +578,13 @@ Deno.serve(async (req) => {
         .update({ promote_checked_at: new Date().toISOString() }).in('id', scannedIds)
     }
 
-    await Promise.all((rows ?? []).map(async (b: Record<string, unknown>) => {
+    // 동시 요청 수 제한. 100건을 한꺼번에 던지면(행당 위키데이터 요청 최대 5회) 공용 IP 에서
+    // 레이트 리밋에 걸려 전부 "엔티티 없음"으로 떨어진다 — Tesla 가 그렇게 탈락했다.
+    const queue = [...(rows ?? [])]
+    const worker = async () => {
+      for (let b = queue.shift(); b; b = queue.shift()) await checkOne(b as Record<string, unknown>)
+    }
+    const checkOne = async (b: Record<string, unknown>) => {
       const name = String(b.name ?? '')
       try {
         const e = await resolveCompany([name])
@@ -565,6 +607,25 @@ Deno.serve(async (req) => {
         } else if (!nameHit) {
           skipped.push(`${name}: 동일 회사 확증 불가 (도메인 없음 + 표제어 불일치)`)
           return
+        } else {
+          // 표제어 일치만으로 받는 경로 — **이름만 같은 다른 회사**가 들어온다.
+          // 실측(2026-10-07): AI 결제 스타트업 Creem → 1969년 동명 엔티티, 워크플로 SaaS Relay → 1852년,
+          // 미국 원클릭 결제 Bolt → 에스토니아 차량호출 Bolt. 수집 시점의 AI 추정치를 반대 증거로 쓴다.
+          //   ① 설립연도: AI 추정치가 있어야 하고 위키데이터와 5년 이내 (DART 경로와 같은 기준)
+          //   ② 국가: 둘 다 알려져 있으면 일치해야 함
+          // AI 가 본사를 틀리게 적은 진짜 회사(Stability AI 등)도 떨어지지만, 검증 칸은 정밀도가 우선이다.
+          const wdYear = e.inception ? Number(e.inception.slice(0, 4)) : null
+          const aiYear = Number(b.founded_year) || null
+          if (!aiYear || !wdYear || Math.abs(aiYear - wdYear) > 5) {
+            skipped.push(`${name}: 표제어만 일치 + 설립연도 불일치/미상 (AI ${aiYear ?? '?'} ≠ WD ${wdYear ?? '?'})`)
+            return
+          }
+          const want = COUNTRY_QID[String(b.hq_country ?? '').toLowerCase()]
+          const have = e.countries ?? (e.country ? [e.country] : [])
+          if (want && have.length && !have.includes(want)) {
+            skipped.push(`${name}: 표제어만 일치 + 국가 불일치 (${b.hq_country} vs ${have.join(',')})`)
+            return
+          }
         }
 
         const gate = judge(e)
@@ -593,10 +654,11 @@ Deno.serve(async (req) => {
         plog.failed++
         perrors.push(`${name}: ${err instanceof Error ? err.message : err}`)
       }
-    }))
+    }
+    await Promise.all(Array.from({ length: 5 }, worker))
 
     return json(200, {
-      ok: true, mode: 'promote', ...plog,
+      ok: true, mode: 'promote', ...plog, wikidata_http: wdHttp,
       elapsed_ms: Date.now() - startedAt,
       promoted, skipped: skipped.slice(0, 40), errors: perrors.slice(0, 5),
     })
