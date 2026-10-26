@@ -26,7 +26,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -e
-          for wf in health.yml weekly.yml monthly.yml keepalive.yml; do
+          for wf in health.yml weekly.yml monthly.yml opportunities.yml keepalive.yml; do
             gh workflow enable "$wf" -R "$REPO"
             echo "$wf: $(gh api "repos/$REPO/actions/workflows/$wf" --jq .state)"
           done

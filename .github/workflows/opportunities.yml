@@ -1,0 +1,40 @@
+name: Opportunities
+
+# 기회 깔때기 — 해외 패턴 감지 → 한국판 기회 카드 → 데스크 검증 → 텔레그램 브리핑.
+# 쓰기는 OPPORTUNITY_SECRET 으로 잠긴 DB 함수로만 한다(service_role 을 올리지 않는다).
+# 시크릿이 없으면 스크립트가 미리보기만 하고 끝난다.
+
+on:
+  schedule:
+    # 매주 월 10:00 KST (01:00 UTC). 주간 보고(09:30) 뒤.
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+    inputs:
+      max_cards:
+        description: '이번 실행에서 새로 만들 카드 수'
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  funnel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - run: node scripts/opportunities.mjs --max-cards=${MAX_CARDS:-3}
+        env:
+          MAX_CARDS: ${{ inputs.max_cards }}
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPPORTUNITY_SECRET: ${{ secrets.OPPORTUNITY_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

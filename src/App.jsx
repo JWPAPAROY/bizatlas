@@ -1,5 +1,5 @@
 import { HashRouter, Routes, Route, Link, NavLink } from 'react-router-dom'
-import { Map, GitCompare, Info, Activity, TrendingUp } from 'lucide-react'
+import { Map, GitCompare, Info, Activity, TrendingUp, Lightbulb } from 'lucide-react'
 import { StoreProvider, useStore } from './lib/store.jsx'
 import Home from './pages/Home.jsx'
 import Detail from './pages/Detail.jsx'
@@ -7,6 +7,7 @@ import Compare from './pages/Compare.jsx'
 import About from './pages/About.jsx'
 import Today from './pages/Today.jsx'
 import Trends from './pages/Trends.jsx'
+import Opportunities from './pages/Opportunities.jsx'
 
 // GitHub Pages 는 SPA 라우팅에 404 가 나므로 HashRouter 를 쓴다 (404.html 트릭 불필요).
 
@@ -26,7 +27,7 @@ function Header() {
           </span>
           <span className="text-lg font-bold tracking-tight">BizAtlas</span>
         </Link>
-        {/* 폰 폭에서는 아이콘만 남긴다 — 메뉴 5개가 글자째 들어가면 페이지가 가로로 넘친다 */}
+        {/* 폰 폭에서는 아이콘만 남긴다 — 메뉴 6개가 글자째 들어가면 페이지가 가로로 넘친다 */}
         <nav className="flex items-center gap-0.5 sm:gap-1">
           <NavLink to="/" className={navCls} end>
             탐색
@@ -38,6 +39,10 @@ function Header() {
           <NavLink to="/trends" className={navCls} title="투자 흐름" aria-label="흐름">
             <TrendingUp size={15} />
             <span className="hidden sm:inline">흐름</span>
+          </NavLink>
+          <NavLink to="/opportunities" className={navCls} title="기회" aria-label="기회">
+            <Lightbulb size={15} />
+            <span className="hidden sm:inline">기회</span>
           </NavLink>
           <NavLink to="/compare" className={navCls} title="비교" aria-label="비교">
             <GitCompare size={15} />
@@ -69,6 +74,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/today" element={<Today />} />
               <Route path="/trends" element={<Trends />} />
+              <Route path="/opportunities" element={<Opportunities />} />
               <Route path="/b/:slug" element={<Detail />} />
               <Route path="/compare" element={<Compare />} />
               <Route path="/about" element={<About />} />
