@@ -1,4 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import { WorldMap } from './WorldMap.jsx'
+import { countryKo } from '../lib/countries.js'
 
 // 기회 신호 지도: 가로 = 해외 선례가 있는 나라 수, 세로 = 해외 선례 회사 수. 점 하나가 기회 하나.
 // 오른쪽 위로 갈수록 "여러 나라에서 여러 회사가 같은 문제를 푼다" — 우연이 아닐 가능성이 크다.
@@ -12,7 +14,34 @@ const PAD = { top: 14, right: 16, bottom: 34, left: 34 }
 const R = 6
 const GAP = 15 // 같은 칸 점 간격(px)
 
-export function SignalMap({ opps, onPick }) {
+// 기회 지도: [세계 지도 | 신호 강도] 전환. 세계 지도 = 선례가 어디 몰렸나, 신호 강도 = 어떤 기회가 센가.
+export function SignalMap({ opps, members, onPick, country, onCountry }) {
+  const [view, setView] = useState('world')
+  if (!opps.length) return null
+  const VIEWS = [['world', '세계 지도'], ['strength', '신호 강도']]
+  return (
+    <figure className="mt-4 rounded-xl border border-ink-200 bg-white p-3">
+      <figcaption className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="inline-flex rounded-lg bg-ink-100 p-0.5">
+          {VIEWS.map(([v, l]) => (
+            <button key={v} type="button" onClick={() => setView(v)}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium ${view === v ? 'bg-white text-ink-900 shadow-sm' : 'text-ink-500'}`}>{l}</button>
+          ))}
+        </span>
+        {country && (
+          <button type="button" onClick={() => onCountry(null)} className="rounded-md bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700">
+            {countryKo(country)} 선례 있는 기회만 · 해제 ✕
+          </button>
+        )}
+      </figcaption>
+      {view === 'world'
+        ? <WorldMap opps={opps} members={members} country={country} onCountry={onCountry} />
+        : <StrengthChart opps={opps} onPick={onPick} />}
+    </figure>
+  )
+}
+
+function StrengthChart({ opps, onPick }) {
   const box = useRef(null)
   const [w, setW] = useState(0)
   const [hover, setHover] = useState(null)
@@ -25,8 +54,6 @@ export function SignalMap({ opps, onPick }) {
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-
-  if (!opps.length) return null
 
   const xMax = Math.max(5, ...opps.map((o) => o.country_count))
   const yMax = Math.max(8, ...opps.map((o) => o.member_count))
@@ -55,15 +82,14 @@ export function SignalMap({ opps, onPick }) {
   const strongX = sx(STRONG_COUNTRIES) - iw / (xMax - xMin + 1) / 2
 
   return (
-    <figure className="mt-4 rounded-xl border border-ink-200 bg-white p-3">
-      <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <span className="text-sm font-semibold text-ink-800">신호 지도</span>
+    <div>
+      <div className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">
         <span className="flex flex-wrap items-center gap-3 text-xs text-ink-500">
           <Legend kind="card" /> 카드 있음
           <Legend kind="plain" /> 신호
           <Legend kind="heavy" /> 자본 부담 큼
         </span>
-      </figcaption>
+      </div>
 
       <div ref={box} className="relative mt-2 w-full min-w-0 overflow-hidden" style={{ height: H }} onMouseLeave={() => setHover(null)}>
         {w > 0 && <svg width={w} height={H} className="block" role="img" aria-label="기회별 해외 선례 국가 수와 회사 수">
@@ -111,7 +137,7 @@ export function SignalMap({ opps, onPick }) {
           </div>
         )}
       </div>
-    </figure>
+    </div>
   )
 }
 
@@ -146,13 +172,3 @@ export function Sparkline({ values, width = 56, height = 18 }) {
     </svg>
   )
 }
-
-const COUNTRY_KO = {
-  'united states': '미국', 'united kingdom': '영국', china: '중국', germany: '독일', singapore: '싱가포르', france: '프랑스',
-  sweden: '스웨덴', netherlands: '네덜란드', italy: '이탈리아', switzerland: '스위스', india: '인도', belgium: '벨기에',
-  spain: '스페인', denmark: '덴마크', finland: '핀란드', lithuania: '리투아니아', japan: '일본', portugal: '포르투갈',
-  indonesia: '인도네시아', ukraine: '우크라이나', norway: '노르웨이', estonia: '에스토니아', romania: '루마니아',
-  israel: '이스라엘', canada: '캐나다', australia: '호주', brazil: '브라질', poland: '폴란드', ireland: '아일랜드',
-  austria: '오스트리아', taiwan: '대만', malaysia: '말레이시아', 'new zealand': '뉴질랜드', turkey: '튀르키예', nigeria: '나이지리아', kenya: '케냐', 'hong kong': '홍콩', vietnam: '베트남', mexico: '멕시코', 'united arab emirates': 'UAE',
-}
-export const countryKo = (c) => COUNTRY_KO[(c ?? '').trim().toLowerCase()] ?? c

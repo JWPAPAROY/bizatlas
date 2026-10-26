@@ -4,7 +4,8 @@ import { Loader2, AlertTriangle, ChevronDown, ExternalLink, Lock, LockOpen } fro
 import { supabase, isConfigured } from '../lib/supabase'
 import { useStore } from '../lib/store.jsx'
 import { FieldStart, FieldPanel, useFieldSecret } from '../components/FieldValidation.jsx'
-import { SignalMap, PrecedentBlocks, Sparkline, countryKo, STRONG_COUNTRIES, HEAVY_CAP } from '../components/SignalMap.jsx'
+import { SignalMap, PrecedentBlocks, Sparkline, STRONG_COUNTRIES, HEAVY_CAP } from '../components/SignalMap.jsx'
+import { countryKo } from '../lib/countries.js'
 import { Scale } from '../components/Scale.jsx'
 
 // 기회 깔때기 결과. 만드는 쪽은 scripts/opportunities.mjs — 숫자는 코드가 businesses 에서 세고 해석만 AI 가 쓴다.
@@ -261,6 +262,7 @@ export default function Opportunities() {
   const [openSet, setOpenSet] = useState(() => new Set(focus ? [focus] : []))
   const [error, setError] = useState(null)
   const [showWeak, setShowWeak] = useState(false)
+  const [country, setCountry] = useState(null)
   const fieldState = useFieldSecret()
   const { secret, field } = fieldState
 
@@ -298,7 +300,8 @@ export default function Opportunities() {
 
   const list = useMemo(() => (opps ?? [])
     .filter((o) => stage === 'all' || o.stage === stage)
-    .sort((a, b) => strength(b) - strength(a)), [opps, stage])
+    .filter((o) => !country || o.members.some((id) => members.get(id)?.hq_country === country))
+    .sort((a, b) => strength(b) - strength(a)), [opps, stage, country, members])
   // 신호·전체 탭에서만 접는다. 데스크·현장·판정 단계는 이미 걸러진 것이라 전부 보여준다.
   const foldable = stage === 'signal' || stage === 'all'
   const strong = foldable ? list.filter((o) => !isWeak(o)) : list
@@ -335,7 +338,10 @@ export default function Opportunities() {
 
       <FieldLock {...fieldState} />
 
-      {opps && <SignalMap opps={opps.filter((o) => !['go', 'killed'].includes(o.stage))} onPick={pickFromMap} />}
+      {opps && (
+        <SignalMap opps={opps.filter((o) => !['go', 'killed'].includes(o.stage))} members={members} onPick={pickFromMap}
+          country={country} onCountry={(c) => { setCountry(c); if (c) setShowWeak(true) }} />
+      )}
 
       <div className="mt-4 flex flex-wrap gap-1">
         {STAGES.map(([v, label]) => (
