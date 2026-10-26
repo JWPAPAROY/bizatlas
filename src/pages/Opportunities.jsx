@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Loader2, AlertTriangle, ChevronDown, ExternalLink } from 'lucide-react'
+import { Loader2, AlertTriangle, ChevronDown, ExternalLink, Lock, LockOpen } from 'lucide-react'
 import { supabase, isConfigured } from '../lib/supabase'
 import { useStore } from '../lib/store.jsx'
+import { FieldStart, FieldPanel, useFieldSecret } from '../components/FieldValidation.jsx'
 
 // 기회 깔때기 결과. 만드는 쪽은 scripts/opportunities.mjs — 숫자는 코드가 businesses 에서 세고 해석만 AI 가 쓴다.
 // Detail 과 같은 원칙으로 사실(선례·숫자·DART 대조)을 해석(AI 카드)보다 앞에 둔다.
@@ -11,6 +12,8 @@ const STAGES = [
   ['desk', '데스크 통과'],
   ['signal', '신호'],
   ['field', '현장 검증'],
+  ['go', '진행'],
+  ['killed', '폐기'],
   ['all', '전체'],
 ]
 const STAGE_BADGE = {
@@ -36,7 +39,7 @@ function Block({ title, children }) {
   )
 }
 
-function Card({ o, members, open, onToggle }) {
+function Card({ o, members, open, onToggle, field, secret, onFieldChange }) {
   const { labelOf } = useStore()
   const c = o.card ?? {}
   const [badge, badgeCls] = STAGE_BADGE[o.stage] ?? STAGE_BADGE.signal
@@ -65,6 +68,14 @@ function Card({ o, members, open, onToggle }) {
 
       {open && (
         <div className="space-y-4 px-4 pb-5">
+          {field && <FieldPanel o={o} v={field} secret={secret} onChange={onFieldChange} />}
+          {!field && ['field', 'go', 'killed'].includes(o.stage) && (
+            <p className="rounded-lg bg-ink-50 p-3 text-xs text-ink-500">현장 검증 기록은 비공개입니다.</p>
+          )}
+          {secret && ['signal', 'desk'].includes(o.stage) && (
+            <FieldStart o={o} secret={secret} onChange={onFieldChange} />
+          )}
+
           <Block title="해외 선례">
             <ul className="space-y-1 text-sm">
               {foreign.map((b) => (
@@ -184,6 +195,39 @@ function Card({ o, members, open, onToggle }) {
   )
 }
 
+// 검증 기록은 'field' 시크릿으로 잠겨 있다. 브라우저에만 저장한다.
+function FieldLock({ secret, unlock, lock, error }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  if (secret) {
+    return (
+      <p className="mt-3 flex items-center gap-2 text-xs text-ink-500">
+        <LockOpen size={13} /> 검증 기록 잠금 해제됨
+        <button type="button" onClick={lock} className="font-medium text-brand-700 hover:underline">잠그기</button>
+      </p>
+    )
+  }
+  if (!editing) {
+    return (
+      <button type="button" onClick={() => setEditing(true)} className="mt-3 inline-flex items-center gap-1.5 text-xs text-ink-400 hover:text-ink-600">
+        <Lock size={13} /> 검증 기록 잠금 해제
+      </button>
+    )
+  }
+  return (
+    <form className="mt-3 flex flex-wrap items-center gap-2" onSubmit={async (e) => {
+      e.preventDefault()
+      if (await unlock(value.trim())) { setEditing(false); setValue('') }
+    }}>
+      <input type="password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="field 시크릿"
+        className="rounded-lg border border-ink-200 px-2.5 py-1.5 text-sm" />
+      <button type="submit" className="rounded-lg bg-ink-900 px-3 py-1.5 text-sm font-medium text-white">열기</button>
+      <button type="button" onClick={() => setEditing(false)} className="text-sm text-ink-500">취소</button>
+      {error && <span className="text-xs text-red-700">{error}</span>}
+    </form>
+  )
+}
+
 export default function Opportunities() {
   const [params, setParams] = useSearchParams()
   const focus = params.get('o')
@@ -192,6 +236,11 @@ export default function Opportunities() {
   const [members, setMembers] = useState(new Map())
   const [openSet, setOpenSet] = useState(() => new Set(focus ? [focus] : []))
   const [error, setError] = useState(null)
+  const fieldState = useFieldSecret()
+  const { secret, field } = fieldState
+
+  const [reload, setReload] = useState(0)
+  const refreshAll = async (refreshField) => { await refreshField(); setReload((n) => n + 1) }
 
   useEffect(() => {
     if (!isConfigured) return
@@ -208,7 +257,7 @@ export default function Opportunities() {
       }
       setMembers(map)
     })()
-  }, [])
+  }, [reload])
 
   useEffect(() => {
     if (focus && opps) document.getElementById(focus)?.scrollIntoView({ block: 'start' })
@@ -245,6 +294,8 @@ export default function Opportunities() {
         숫자는 수집 데이터에서 세고, 해석은 AI가 씁니다. 매주 월요일 갱신.
       </p>
 
+      <FieldLock {...fieldState} />
+
       <div className="mt-4 flex flex-wrap gap-1">
         {STAGES.map(([v, label]) => (
           <button key={v} type="button" onClick={() => pick(v)}
@@ -267,7 +318,8 @@ export default function Opportunities() {
       <ul className="mt-4 space-y-3">
         {list.map((o) => (
           <Card key={o.slug} o={o} members={o.members.map((id) => members.get(id)).filter(Boolean)}
-            open={openSet.has(o.slug)} onToggle={() => toggle(o.slug)} />
+            open={openSet.has(o.slug)} onToggle={() => toggle(o.slug)}
+            field={field?.[o.id]} secret={secret} onFieldChange={() => refreshAll(fieldState.refresh)} />
         ))}
       </ul>
     </div>
