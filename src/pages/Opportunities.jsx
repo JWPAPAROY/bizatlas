@@ -248,6 +248,8 @@ export default function Opportunities() {
       const { data, error } = await supabase.from('opportunities').select('*')
       if (error) { setError(error.message); return }
       setOpps(data ?? [])
+      // 데스크 통과가 없으면 첫 화면이 비지 않게 신호 탭으로 연다 (주소에 stage 를 고른 경우는 그대로)
+      if (!params.get('stage') && !focus && !(data ?? []).some((o) => o.stage === 'desk')) setStage('signal')
       const ids = [...new Set((data ?? []).flatMap((o) => o.members))]
       if (!ids.length) return
       const map = new Map()
