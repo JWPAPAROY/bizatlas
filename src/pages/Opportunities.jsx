@@ -4,6 +4,8 @@ import { Loader2, AlertTriangle, ChevronDown, ExternalLink, Lock, LockOpen } fro
 import { supabase, isConfigured } from '../lib/supabase'
 import { useStore } from '../lib/store.jsx'
 import { FieldStart, FieldPanel, useFieldSecret } from '../components/FieldValidation.jsx'
+import { SignalMap, PrecedentBlocks, Sparkline, countryKo, STRONG_COUNTRIES, HEAVY_CAP } from '../components/SignalMap.jsx'
+import { Scale } from '../components/Scale.jsx'
 
 // 기회 깔때기 결과. 만드는 쪽은 scripts/opportunities.mjs — 숫자는 코드가 businesses 에서 세고 해석만 AI 가 쓴다.
 // Detail 과 같은 원칙으로 사실(선례·숫자·DART 대조)을 해석(AI 카드)보다 앞에 둔다.
@@ -27,6 +29,8 @@ const SOLO = { high: '높음', mid: '보통', low: '낮음' }
 const SEVERITY = { blocker: ['장벽', 'text-red-700'], caution: ['주의', 'text-amber-700'], none: ['해당 없음', 'text-ink-400'] }
 
 const strength = (o) => o.country_count * 2 + o.member_count + o.funded_count
+// 약한 신호: 카드가 없고, 나라가 적거나 자본 부담이 크다. 지우지 않고 접어 둔다 — 매주 자라는지 본다.
+const isWeak = (o) => !o.carded_at && (o.country_count < STRONG_COUNTRIES || (o.cap_avg ?? 0) > HEAVY_CAP)
 const naver = (q) => `https://search.naver.com/search.naver?query=${encodeURIComponent(q)}`
 const trends = (kws) => `https://trends.google.com/trends/explore?geo=KR&date=today%205-y&q=${(kws ?? []).slice(0, 5).map(encodeURIComponent).join(',')}`
 
@@ -46,6 +50,8 @@ function Card({ o, members, open, onToggle, field, secret, onFieldChange }) {
   const hasCard = Boolean(o.carded_at)
   const foreign = members.filter((b) => !/korea/i.test(b.hq_country ?? ''))
   const hist = o.history ?? []
+  const countries = [...foreign.reduce((m, b) => b.hq_country ? m.set(b.hq_country, (m.get(b.hq_country) ?? 0) + 1) : m, new Map())]
+    .sort((a, b) => b[1] - a[1])
 
   return (
     <li id={o.slug} className="rounded-xl border border-ink-200 bg-white">
@@ -57,11 +63,29 @@ function Card({ o, members, open, onToggle, field, secret, onFieldChange }) {
           </div>
           <h2 className="mt-1.5 font-semibold text-ink-900">{o.title}</h2>
           <p className="mt-1 text-sm text-ink-600">{o.problem}</p>
-          <p className="mt-2 text-xs text-ink-500 tabular-nums">
-            해외 선례 <b className="text-ink-800">{o.member_count}곳</b> · {o.country_count}개국 · 투자 {o.funded_count}건
-            {o.cap_avg != null && ` · 자본 부담 ${Number(o.cap_avg).toFixed(1)}/5`}
-            {hist.length > 1 && ` · 추이 ${hist.map((h) => h.members).join('→')}`}
-          </p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-ink-500 tabular-nums">
+            <span className="inline-flex items-center gap-1.5">
+              <PrecedentBlocks total={o.member_count} funded={o.funded_count} />
+              선례 <b className="text-ink-800">{o.member_count}</b> · 투자 {o.funded_count}
+            </span>
+            {o.cap_avg != null && (
+              <span className="inline-flex items-center gap-1.5" title="선례의 자본 집약도 평균 (1=노트북 한 대, 5=공장·인가 자본금)">
+                자본 부담 <Scale value={Math.round(o.cap_avg)} tone="warn" compact />
+              </span>
+            )}
+            {hist.length > 1 && (
+              <span className="inline-flex items-center gap-1">추이 <Sparkline values={hist.map((h) => h.members)} /></span>
+            )}
+          </div>
+          {countries.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {countries.map(([c, n]) => (
+                <span key={c} className="rounded-md bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-600">
+                  {countryKo(c)}{n > 1 && <span className="text-ink-400 tabular-nums"> {n}</span>}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <ChevronDown size={18} className={`mt-1 shrink-0 text-ink-400 transition ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -236,6 +260,7 @@ export default function Opportunities() {
   const [members, setMembers] = useState(new Map())
   const [openSet, setOpenSet] = useState(() => new Set(focus ? [focus] : []))
   const [error, setError] = useState(null)
+  const [showWeak, setShowWeak] = useState(false)
   const fieldState = useFieldSecret()
   const { secret, field } = fieldState
 
@@ -274,6 +299,18 @@ export default function Opportunities() {
   const list = useMemo(() => (opps ?? [])
     .filter((o) => stage === 'all' || o.stage === stage)
     .sort((a, b) => strength(b) - strength(a)), [opps, stage])
+  // 신호·전체 탭에서만 접는다. 데스크·현장·판정 단계는 이미 걸러진 것이라 전부 보여준다.
+  const foldable = stage === 'signal' || stage === 'all'
+  const strong = foldable ? list.filter((o) => !isWeak(o)) : list
+  const weak = foldable ? list.filter(isWeak) : []
+
+  // 지도에서 점을 누르면: 그 카드가 보이는 탭·접힘 상태로 바꾸고 펼쳐서 스크롤
+  const pickFromMap = (o) => {
+    if (stage !== 'all' && o.stage !== stage) pick(o.stage)
+    if (isWeak(o)) setShowWeak(true)
+    setOpenSet((prev) => new Set(prev).add(o.slug))
+    setTimeout(() => document.getElementById(o.slug)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
 
   const pick = (s) => {
     setStage(s)
@@ -298,6 +335,8 @@ export default function Opportunities() {
 
       <FieldLock {...fieldState} />
 
+      {opps && <SignalMap opps={opps.filter((o) => !['go', 'killed'].includes(o.stage))} onPick={pickFromMap} />}
+
       <div className="mt-4 flex flex-wrap gap-1">
         {STAGES.map(([v, label]) => (
           <button key={v} type="button" onClick={() => pick(v)}
@@ -318,12 +357,19 @@ export default function Opportunities() {
       )}
 
       <ul className="mt-4 space-y-3">
-        {list.map((o) => (
+        {(showWeak ? [...strong, ...weak] : strong).map((o) => (
           <Card key={o.slug} o={o} members={o.members.map((id) => members.get(id)).filter(Boolean)}
             open={openSet.has(o.slug)} onToggle={() => toggle(o.slug)}
             field={field?.[o.id]} secret={secret} onFieldChange={() => refreshAll(fieldState.refresh)} />
         ))}
       </ul>
+      {weak.length > 0 && (
+        <button type="button" onClick={() => setShowWeak((v) => !v)}
+          className="mt-3 w-full rounded-xl border border-dashed border-ink-300 py-2.5 text-sm text-ink-500 hover:bg-white">
+          {showWeak ? '약한 신호 접기' : `약한 신호 ${weak.length}건 더 보기`}
+          <span className="block text-xs text-ink-400">{STRONG_COUNTRIES}개국 미만이거나 자본 부담 {HEAVY_CAP} 초과 · 매주 선례가 늘면 위로 올라옵니다</span>
+        </button>
+      )}
     </div>
   )
 }
