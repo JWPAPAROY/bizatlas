@@ -17,6 +17,7 @@
 //   토큰이 없으면 콘솔 미리보기만 한다.
 
 import { monthlyShares, monthKey, median, SEED_SOURCES, VC_STAGES } from '../src/lib/trends.js'
+import { themeCounts, zDiff } from './lib/report-tags.mjs'
 
 const URL_ = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_ANON_KEY
@@ -65,7 +66,8 @@ async function sb(path) {
 const iso = (t) => new Date(t).toISOString()
 const [taxonomy, all, runs, roundRows] = await Promise.all([
   sb('taxonomy?select=kind,value,label_ko'),
-  sb(`businesses?select=name,slug,category,region,customer_type,source_name,funding_usd_m,funding_stage,tags,created_at` +
+  sb(`businesses?select=name,slug,category,region,customer_type,source_name,funding_usd_m,funding_stage,tags,created_at,` +
+     `korea_fit,capital_intensity,replicability,korea_analogs` +
      `&status=eq.published&created_at=gte.${iso(bStart)}&created_at=lt.${iso(tEnd)}`),
   sb(`ingest_runs?select=started_at,finished_at,created,failed&started_at=gte.${iso(tStart)}&started_at=lt.${iso(tEnd)}`),
   sb(`funding_rounds?select=stage,usd_m,source_name,reported_at,businesses(name,slug,category,region)&reported_at=gte.${iso(bStart)}&reported_at=lt.${iso(tEnd)}`),
@@ -88,11 +90,7 @@ if (!cur.length) { console.error(`${target} 데이터 없음`); process.exit(0) 
 
 const usd = (v) => v == null ? '—' : v >= 1000 ? `$${(v / 1000).toFixed(1)}B` : v >= 10 ? `$${Math.round(v)}M` : `$${v.toFixed(1)}M`
 
-const z = (p1, n1, p2, n2) => {
-  const p = (p1 * n1 + p2 * n2) / (n1 + n2)
-  const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2))
-  return se ? (p1 - p2) / se : 0
-}
+const z = zDiff
 
 // ── 1) 분야 비중 변화 (소스 보정). 기준 = 기준 월들의 보정 비중을 표본 수로 가중 평균
 function shareShifts(field) {
@@ -145,16 +143,35 @@ const rounds = Object.keys(STAGE_LABEL).map((s) => {
 })
 const topRounds = [...vcCur].sort((a, b) => b.funding_usd_m - a.funding_usd_m).slice(0, 5)
 
-// ── 5) 태그 상승·하락 (월 단위라 최소 건수를 높인다)
-const REGION_WORDS = /^(유럽|미국|북미|동남아시아|동남아|아시아|중국|인도|일본|한국|영국|독일|프랑스|europe|usa|asia)$/i
-const tagCount = (xs) => { const m = new Map(); for (const r of xs) for (const t of new Set(r.tags ?? [])) if (!REGION_WORDS.test(t)) m.set(t, (m.get(t) ?? 0) + 1); return m }
-const tc = tagCount(cur), tb = tagCount(base)
+// ── 5) 주제 상승·하락 (월 단위라 최소 건수를 높인다)
+// 태그 문자열이 아니라 주제 단위로 센다(report-tags). 기준은 합계가 아니라 **월평균**으로 보여준다 —
+// 2개월 합계와 한 달을 나란히 쓰면 하락이 두 배로 보였다(10월 "우주항공 23→6", 실제 월 17→13).
+// 하락은 기준 기간 중 한 달만 튄 주제를 거른다. 9월에만 몰렸다 돌아온 것("컴플라이언스 13→0")은 하락이 아니라 복귀다.
+const { counts: tc } = themeCounts(cur)
+const { counts: tb } = themeCounts(base)
+const { labelOf: tagLabel } = themeCounts([...cur, ...base]) // 이번 달에 없는(하락) 주제도 원래 표기로 보이게
+const perMonth = baseMonths.map((m) => themeCounts(base.filter((r) => monthKey(r.created_at) === m)).counts)
+const nb = Math.max(baseMonths.length, 1)
 const floor = 0.5 / Math.max(base.length, 1)
 const lift = (t) => ((tc.get(t) ?? 0) / cur.length) / Math.max((tb.get(t) ?? 0) / Math.max(base.length, 1), floor)
-const tagsUp = base.length ? [...tc].filter(([t, n]) => n >= 6 && lift(t) >= 2).map(([t, n]) => ({ t, n, was: tb.get(t) ?? 0, lift: lift(t) }))
+// 분야 비중과 같은 기준으로 유의할 때만 부른다. 한 달 4건이 0건 된 것 같은 작은 변화는 우연과 구별되지 않는다.
+const sig = (t) => Math.abs(z((tc.get(t) ?? 0) / cur.length, cur.length, (tb.get(t) ?? 0) / Math.max(base.length, 1), base.length)) >= MIN_Z
+const steady = (t) => { const avg = (tb.get(t) ?? 0) / nb; return perMonth.every((c) => (c.get(t) ?? 0) >= avg * 0.5) }
+const tagsUp = base.length ? [...tc].filter(([t, n]) => n >= 6 && lift(t) >= 2 && sig(t)).map(([t, n]) => ({ t, n, was: (tb.get(t) ?? 0) / nb, lift: lift(t) }))
   .sort((a, b) => b.lift - a.lift).slice(0, 6) : []
-const tagsDown = base.length ? [...tb].filter(([t, n]) => n >= 8 && lift(t) <= 0.5).map(([t, n]) => ({ t, n: tc.get(t) ?? 0, was: n, lift: lift(t) }))
+// 기준 월이 하나뿐이면 그 달이 튄 것인지 알 수 없어 하락은 부르지 않는다.
+const tagsDown = baseMonths.length >= 2 ? [...tb].filter(([t, n]) => n / nb >= 4 && lift(t) <= 0.5 && steady(t) && sig(t)).map(([t, n]) => ({ t, n: tc.get(t) ?? 0, was: n / nb, lift: lift(t) }))
   .sort((a, b) => a.lift - b.lift).slice(0, 4) : []
+const avg1 = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1))
+
+// ── 이식 후보 (주간 보고와 같은 기준: 한국 적용성 4+ · 자본 2 이하). 시드 포함 — 새로 들어온 검증 회사도 후보다.
+const isCand = (r) => r.korea_fit >= 4 && r.capital_intensity != null && r.capital_intensity <= 2
+const candCur = all.filter((r) => monthKey(r.created_at) === target && isCand(r))
+const candBaseAvg = baseMonths.length ? all.filter((r) => monthKey(r.created_at) < target && isCand(r)).length / baseMonths.length : null
+const candTop = [...candCur]
+  .sort((a, b) => (a.korea_analogs?.length ? 1 : 0) - (b.korea_analogs?.length ? 1 : 0)
+    || b.korea_fit - a.korea_fit || (a.replicability ?? 9) - (b.replicability ?? 9) || (b.funding_usd_m ?? 0) - (a.funding_usd_m ?? 0))
+  .slice(0, 3)
 
 // ── 6) 파이프라인
 const unfinished = runs.filter((r) => !r.finished_at).length
@@ -170,8 +187,8 @@ const facts = {
   source_mix_changes: srcChanges.map((x) => ({ source: x.s, now_pct: +x.now.toFixed(1), was_pct: +x.was.toFixed(1), new_source: x.isNew })),
   region_raw_not_adjustable: regions.map((x) => ({ region: REGION_LABEL[x.g] ?? x.g, now_pct: +x.now.toFixed(1), was_pct: x.was == null ? null : +x.was.toFixed(1) })),
   round_size_medians_usd_m: rounds.map((x) => ({ stage: STAGE_LABEL[x.s], now: x.now == null ? null : +x.now.toFixed(1), was: x.was == null ? null : +x.was.toFixed(1), n_now: x.n, n_was: x.nb, reliable: x.reliable })),
-  rising_tags: tagsUp.map((x) => ({ tag: x.t, now: x.n, was: x.was })),
-  falling_tags: tagsDown.map((x) => ({ tag: x.t, now: x.n, was: x.was })),
+  rising_tags: tagsUp.map((x) => ({ tag: tagLabel(x.t), now: x.n, was: avg1(x.was) })),
+  falling_tags: tagsDown.map((x) => ({ tag: tagLabel(x.t), now: x.n, was: avg1(x.was) })),
 }
 
 // 모델에 넘기는 사실은 한국어 키로. 영문 필드명(reliable·n_now…)을 주면 해설에 그대로 새어 나온다(실측).
@@ -186,12 +203,12 @@ const factsKo = {
   라운드중앙값: rounds.filter((x) => x.n).map((x) => ({
     단계: STAGE_LABEL[x.s], 이번달: usd(x.now), 기준: usd(x.was), 표본: x.reliable ? '충분' : '부족',
   })),
-  상승태그: facts.rising_tags.map((x) => `${x.tag} ${x.was}→${x.now}건`),
-  하락태그: facts.falling_tags.map((x) => `${x.tag} ${x.was}→${x.now}건`),
+  상승주제_기준월평균에서_이번달: facts.rising_tags.map((x) => `${x.tag} 월 ${x.was}→${x.now}건`),
+  하락주제_기준월평균에서_이번달: facts.falling_tags.map((x) => `${x.tag} 월 ${x.was}→${x.now}건`),
 }
 
 // 필드명·내부 용어·표본 수·LaTeX 가 새어 나온 불릿은 버린다 (실측으로 본 유형들)
-const LEAK = /[a-z]+_[a-z_]+|reliable|\btrue\b|\bfalse\b|JSON|n\s?=\s?\d|%\$|\$\d[\d.]*%|보정불가|유의한것만/i
+const LEAK = /[a-z]+_[a-z_]+|reliable|\btrue\b|\bfalse\b|JSON|n\s?=\s?\d|%\$|\$\d[\d.]*%|보정불가|유의한것만|기준월평균에서/i
 
 async function commentary() {
   const key = process.env.GEMINI_API_KEY
@@ -200,7 +217,7 @@ async function commentary() {
 이 집계에서 의미 있는 변화 동향을 한국어 불릿 3~5개로 짚으세요.
 
 좋은 해설은 숫자를 옮겨 적는 게 아니라 **무엇이 움직였고 무엇이 그대로인지**를 말합니다.
-- 서로 관련된 태그(예: 사이버보안·보안·컴플라이언스)는 하나의 테마로 묶어 말하세요.
+- 태그는 이미 주제 단위로 묶여 있습니다. 서로 관련된 주제(예: 보안·컴플라이언스)는 하나의 흐름으로 말해도 됩니다.
 - 분야 비중(category_shifts_mix_adjusted)이 비어 있으면 "소스 보정 후 분야 비중은 유의하게 변하지 않았다"는 점과
   태그 테마 변화를 대조하세요 — 분야 안의 세부 주제가 움직인 것일 수 있습니다.
 - 라운드 크기는 "그대로/커짐/작아짐"으로 요약하세요.
@@ -251,6 +268,13 @@ L.push('')
 const avg = facts.new_items.baseline_monthly_avg
 L.push(`📥 신규 <b>${cur.length}건</b>${avg ? ` (기준 월평균 ${avg}건, ${cur.length >= avg ? '+' : ''}${Math.round(((cur.length - avg) / avg) * 100)}%)` : ''}`)
 
+L.push('')
+L.push(`🇰🇷 <b>이식 후보 ${candCur.length}건</b>${candBaseAvg != null ? ` (기준 월평균 ${Math.round(candBaseAvg)}건)` : ''} <i>한국 적용성 4+ · 자본 2 이하</i>`)
+for (const r of candTop) {
+  const analog = r.korea_analogs?.length ? `국내 유사 ${r.korea_analogs.slice(0, 2).map(esc).join('·')}` : '국내 유사 없음'
+  L.push(`· <a href="${SITE}/b/${encodeURIComponent(r.slug)}">${esc(r.name)}</a> 한국${r.korea_fit} 자본${r.capital_intensity} 복제${r.replicability ?? '—'} · ${analog}${r.replicability >= 4 ? ' · ⚠ 복제 쉬움' : ''}`)
+}
+
 if (bullets) {
   L.push('')
   L.push('🧭 <b>변화 동향</b>')
@@ -277,9 +301,9 @@ if (topRounds.length) {
 
 if (tagsUp.length || tagsDown.length) {
   L.push('')
-  if (tagsUp.length) L.push(`🔥 <b>상승</b> ${tagsUp.map((x) => `${esc(x.t)} ${x.was}→${x.n}`).join(' · ')}`)
-  if (tagsDown.length) L.push(`❄️ <b>하락</b> ${tagsDown.map((x) => `${esc(x.t)} ${x.was}→${x.n}`).join(' · ')}`)
-  L.push(`<i>(기준 ${baseMonths.length}개월 합계 → 이번 달 건수)</i>`)
+  if (tagsUp.length) L.push(`🔥 <b>상승</b> ${tagsUp.map((x) => `${esc(tagLabel(x.t))} ${avg1(x.was)}→${x.n}`).join(' · ')}`)
+  if (tagsDown.length) L.push(`❄️ <b>하락</b> ${tagsDown.map((x) => `${esc(tagLabel(x.t))} ${avg1(x.was)}→${x.n}`).join(' · ')}`)
+  L.push(`<i>(주제 단위 · 기준 월평균 → 이번 달 건수)</i>`)
 }
 
 L.push('')
@@ -290,10 +314,13 @@ if (srcChanges.length) {
 }
 
 L.push('')
-L.push(`🔧 수집 ${runs.length}회${unfinished ? ` (⚠ 미완료 ${unfinished})` : ''} · AI 처리 실패 ${aiFail}건`)
+// 실패 건수만으로는 많은지 알 수 없어 비율로 쓴다. 평소 15% 안팎(2026-10 실측).
+const created = runs.reduce((s, r) => s + (r.created ?? 0), 0)
+const failRate = created + aiFail ? Math.round((aiFail / (created + aiFail)) * 100) : 0
+L.push(`🔧 수집 ${runs.length}회${unfinished ? ` (⚠ 미완료 ${unfinished})` : ''} · AI 처리 실패율 ${failRate}%${failRate > 25 ? ' ⚠ 평소 ~15%' : ''}`)
 L.push('')
 L.push(`<i>테크 매체 보도 기준 · 해설은 AI가 집계 숫자만으로 작성</i>`)
-L.push(`<a href="${SITE}/trends">투자 흐름 보기</a>`)
+L.push(`<a href="${SITE}/?tier=all&amp;kfit=4&amp;cap=2">이식 후보 전체</a> · <a href="${SITE}/trends">투자 흐름</a> · <a href="${SITE}/opportunities">기회 카드</a>`)
 
 const text = L.join('\n')
 console.log(text.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
