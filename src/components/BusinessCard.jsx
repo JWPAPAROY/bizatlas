@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Plus, Check } from 'lucide-react'
 import { useStore } from '../lib/store.jsx'
 import { Scale } from './Scale.jsx'
+import { exploreLink } from '../lib/explore'
 
 export default function BusinessCard({ biz }) {
   const { labelOf, compare, toggleCompare, MAX_COMPARE } = useStore()
@@ -9,7 +10,7 @@ export default function BusinessCard({ biz }) {
   const full = compare.length >= MAX_COMPARE && !selected
 
   return (
-    <article className="group relative flex flex-col rounded-xl border border-ink-200 bg-white p-4 transition hover:border-brand-200 hover:shadow-sm">
+    <article className="group relative flex min-w-0 flex-col rounded-xl border border-ink-200 bg-white p-4 transition hover:border-brand-200 hover:shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <Link to={`/b/${biz.slug}`} className="block">
@@ -26,12 +27,14 @@ export default function BusinessCard({ biz }) {
         <button
           type="button"
           onClick={() => toggleCompare(biz)}
-          disabled={full}
           title={full ? `비교는 최대 ${MAX_COMPARE}개까지` : selected ? '비교에서 제외' : '비교에 추가'}
+          aria-label={selected ? '비교에서 제외' : '비교에 추가'}
           className={`shrink-0 rounded-lg border p-1.5 transition ${
             selected
               ? 'border-brand-600 bg-brand-600 text-white'
-              : 'border-ink-200 text-ink-400 hover:border-brand-500 hover:text-brand-600 disabled:opacity-40 disabled:hover:border-ink-200 disabled:hover:text-ink-400'
+              : full
+                ? 'border-ink-200 text-ink-300'
+                : 'border-ink-200 text-ink-400 hover:border-brand-500 hover:text-brand-600'
           }`}
         >
           {selected ? <Check size={14} /> : <Plus size={14} />}
@@ -44,17 +47,23 @@ export default function BusinessCard({ biz }) {
 
       <div className="mt-3 flex flex-wrap gap-1">
         {biz.revenue_models?.slice(0, 3).map((m) => (
-          <span
+          <Link
             key={m}
-            className="rounded-md bg-brand-50 px-1.5 py-0.5 text-xs font-medium text-brand-700"
+            to={exploreLink({ rev: m })}
+            title="이 수익 모델로 거르기"
+            className="rounded-md bg-brand-50 px-1.5 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
           >
             {labelOf('revenue_model', m)}
-          </span>
+          </Link>
         ))}
         {biz.customer_type && (
-          <span className="rounded-md bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-600">
+          <Link
+            to={exploreLink({ cust: biz.customer_type })}
+            title="이 고객 유형으로 거르기"
+            className="rounded-md bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-600 hover:bg-ink-200"
+          >
             {labelOf('customer_type', biz.customer_type)}
-          </span>
+          </Link>
         )}
       </div>
 

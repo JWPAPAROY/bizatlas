@@ -106,6 +106,8 @@ export default function Compare() {
   const { compare, toggleCompare, clearCompare, labelOf, MAX_COMPARE } = useStore()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  // 행이 17개라 다 훑기 어렵다. 값이 모두 같은 행(같은 산업·같은 고객 유형 등)을 접어 차이만 남긴다.
+  const [diffOnly, setDiffOnly] = useState(false)
 
   useEffect(() => {
     if (!isConfigured || compare.length === 0) { setRows([]); setLoading(false); return }
@@ -145,24 +147,46 @@ export default function Compare() {
     )
   }
 
+  const same = (row) => {
+    const vals = rows.map((b) => JSON.stringify(b[row.key] ?? null))
+    return vals.every((v) => v === vals[0])
+  }
+  const sameCount = rows.length > 1 ? ROWS.filter(same).length : 0
+  const visible = diffOnly && rows.length > 1 ? ROWS.filter((row) => !same(row)) : ROWS
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-bold">비교 ({rows.length})</h1>
-        <button
-          type="button"
-          onClick={clearCompare}
-          className="text-sm text-ink-500 hover:text-ink-800"
-        >
-          전체 비우기
-        </button>
+        <div className="flex items-center gap-4">
+          {rows.length > 1 && (
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-ink-600">
+              <input
+                type="checkbox"
+                checked={diffOnly}
+                onChange={(e) => setDiffOnly(e.target.checked)}
+                className="accent-teal-600"
+              />
+              차이 나는 항목만
+              {sameCount > 0 && <span className="text-xs text-ink-400">(같은 항목 {sameCount}개 숨김)</span>}
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={clearCompare}
+            className="text-sm text-ink-500 hover:text-ink-800"
+          >
+            전체 비우기
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-ink-200 bg-white">
         <table className="w-full min-w-[640px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-ink-200">
-              <th className="w-32 bg-ink-50 p-3 text-left text-xs font-semibold text-ink-400">항목</th>
+              {/* 첫 열은 고정한다 — 폰에서 가로로 밀면 무슨 행인지 알 수 없게 된다 */}
+              <th className="sticky left-0 z-10 w-24 bg-ink-50 p-3 text-left text-xs font-semibold text-ink-400 sm:w-32">항목</th>
               {rows.map((b) => (
                 <th key={b.id} className="p-3 text-left align-top">
                   <div className="flex items-start justify-between gap-2">
@@ -183,9 +207,9 @@ export default function Compare() {
             </tr>
           </thead>
           <tbody>
-            {ROWS.map((row) => (
+            {visible.map((row) => (
               <tr key={row.key} className="border-b border-ink-100 last:border-0">
-                <th className="bg-ink-50 p-3 text-left align-top text-xs font-medium text-ink-500">
+                <th className="sticky left-0 z-10 bg-ink-50 p-3 text-left align-top text-xs font-medium text-ink-500">
                   {row.label}
                 </th>
                 {rows.map((b) => (

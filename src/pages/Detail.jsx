@@ -1,9 +1,51 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Loader2, Plus, Check, AlertTriangle } from 'lucide-react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, ExternalLink, Loader2, Plus, Check, AlertTriangle, Lightbulb } from 'lucide-react'
 import { supabase, isConfigured } from '../lib/supabase'
 import { useStore } from '../lib/store.jsx'
-import { AxisRow } from '../components/Scale.jsx'
+import { AxisRow, Scale } from '../components/Scale.jsx'
+import { exploreLink } from '../lib/explore'
+
+const OPP_STAGE = {
+  signal: '신호', desk: '데스크 통과', field: '현장 검증 중', go: '진행', killed: '폐기',
+}
+
+// 같은 수익 모델·해자·산업을 얼마나 공유하는지로 고른다. 상세가 막다른 길이 되지 않게
+// 비교할 만한 다음 후보를 보여주는 것이 목적이라, 정밀한 유사도보다 이유가 읽히는 점수를 쓴다.
+const SIM_COLS = 'id, slug, name, one_liner, category, customer_type, revenue_models, moats, tier, hq_country, capital_intensity, replicability, korea_fit'
+function similarity(a, b) {
+  const shared = (x, y) => (x ?? []).filter((v) => (y ?? []).includes(v)).length
+  return shared(a.revenue_models, b.revenue_models) * 2
+    + shared(a.moats, b.moats) * 2
+    + (a.category && a.category === b.category ? 3 : 0)
+    + (a.customer_type && a.customer_type === b.customer_type ? 1 : 0)
+    + (b.tier === 'proven' ? 0.5 : 0)
+}
+
+async function loadSimilar(biz) {
+  const base = () => supabase.from('businesses').select(SIM_COLS).eq('status', 'published').neq('id', biz.id).limit(40)
+  const queries = []
+  if (biz.revenue_models?.length && biz.category)
+    queries.push(base().eq('category', biz.category).overlaps('revenue_models', biz.revenue_models))
+  if (biz.moats?.length && biz.revenue_models?.length)
+    queries.push(base().overlaps('moats', biz.moats).overlaps('revenue_models', biz.revenue_models))
+  if (biz.category) queries.push(base().eq('category', biz.category))
+  const results = await Promise.all(queries)
+  const byId = new Map()
+  for (const { data } of results) for (const b of data ?? []) byId.set(b.id, b)
+  return [...byId.values()]
+    .map((b) => ({ ...b, score: similarity(biz, b) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+}
+
+function TagLink({ to, className, title, children }) {
+  return (
+    <Link to={to} title={title} className={`${className} hover:ring-1 hover:ring-brand-300`}>
+      {children}
+    </Link>
+  )
+}
 
 function Section({ title, children }) {
   return (
@@ -19,6 +61,16 @@ export default function Detail() {
   const { labelOf, descOf, compare, toggleCompare, MAX_COMPARE } = useStore()
   const [biz, setBiz] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [opps, setOpps] = useState([])
+  const [similar, setSimilar] = useState([])
+  const navigate = useNavigate()
+  const location = useLocation()
+  // 앱 안에서 들어왔으면 뒤로가기로 돌아가 필터·스크롤을 살린다. 링크로 바로 열었으면 목록 첫 화면으로.
+  const goBack = (e) => {
+    if (location.key === 'default') return
+    e.preventDefault()
+    navigate(-1)
+  }
 
   useEffect(() => {
     if (!isConfigured) { setLoading(false); return }
@@ -27,6 +79,19 @@ export default function Detail() {
       .from('businesses').select('*').eq('slug', slug).maybeSingle()
       .then(({ data }) => { setBiz(data); setLoading(false) })
   }, [slug])
+
+  useEffect(() => {
+    setOpps([])
+    setSimilar([])
+    if (!biz) return
+    let stale = false
+    supabase
+      .from('opportunities').select('slug, title, stage, country_count, member_count')
+      .contains('members', [biz.id])
+      .then(({ data }) => { if (!stale) setOpps(data ?? []) })
+    loadSimilar(biz).then((list) => { if (!stale) setSimilar(list) })
+    return () => { stale = true }
+  }, [biz])
 
   if (loading) {
     return (
@@ -53,7 +118,7 @@ export default function Detail() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
-      <Link to="/" className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-800">
+      <Link to="/" onClick={goBack} className="inline-flex items-center gap-1 text-sm text-ink-500 hover:text-ink-800">
         <ArrowLeft size={15} /> 목록으로
       </Link>
 
@@ -63,21 +128,31 @@ export default function Detail() {
             <h1 className="text-2xl font-bold tracking-tight">{biz.name}</h1>
             <p className="mt-1 text-sm text-ink-500">
               {[
-                labelOf('category', biz.category),
-                labelOf('customer_type', biz.customer_type),
+                biz.category && (
+                  <Link key="cat" to={exploreLink({ cat: biz.category })} className="hover:text-brand-700 hover:underline" title="이 산업으로 거르기">
+                    {labelOf('category', biz.category)}
+                  </Link>
+                ),
+                biz.customer_type && (
+                  <Link key="cust" to={exploreLink({ cust: biz.customer_type })} className="hover:text-brand-700 hover:underline" title="이 고객 유형으로 거르기">
+                    {labelOf('customer_type', biz.customer_type)}
+                  </Link>
+                ),
                 biz.hq_country,
                 biz.founded_year && `${biz.founded_year}년 설립`,
-              ].filter(Boolean).join(' · ')}
+              ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]))}
             </p>
           </div>
           <button
             type="button"
             onClick={() => toggleCompare(biz)}
-            disabled={full}
+            title={full ? `비교는 최대 ${MAX_COMPARE}개까지` : undefined}
             className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition ${
               selected
                 ? 'border-brand-600 bg-brand-600 text-white'
-                : 'border-ink-200 bg-white text-ink-600 hover:border-brand-500 disabled:opacity-40'
+                : full
+                  ? 'border-ink-200 bg-white text-ink-400'
+                  : 'border-ink-200 bg-white text-ink-600 hover:border-brand-500'
             }`}
           >
             {selected ? <Check size={15} /> : <Plus size={15} />}
@@ -145,9 +220,10 @@ export default function Detail() {
           <ul className="space-y-1.5">
             {biz.revenue_models.map((m) => (
               <li key={m} className="flex flex-wrap items-baseline gap-x-2">
-                <span className="rounded-md bg-brand-50 px-2 py-0.5 text-sm font-medium text-brand-700">
+                <TagLink to={exploreLink({ rev: m })} title="이 수익 모델을 쓰는 회사 보기"
+                  className="rounded-md bg-brand-50 px-2 py-0.5 text-sm font-medium text-brand-700">
                   {labelOf('revenue_model', m)}
-                </span>
+                </TagLink>
                 <span className="text-xs text-ink-500">{descOf('revenue_model', m)}</span>
               </li>
             ))}
@@ -166,9 +242,10 @@ export default function Detail() {
           <ul className="space-y-1.5">
             {biz.moats.map((m) => (
               <li key={m} className="flex flex-wrap items-baseline gap-x-2">
-                <span className="rounded-md bg-ink-100 px-2 py-0.5 text-sm font-medium text-ink-700">
+                <TagLink to={exploreLink({ moat: m })} title="이 해자를 가진 회사 보기"
+                  className="rounded-md bg-ink-100 px-2 py-0.5 text-sm font-medium text-ink-700">
                   {labelOf('moat', m)}
-                </span>
+                </TagLink>
                 <span className="text-xs text-ink-500">{descOf('moat', m)}</span>
               </li>
             ))}
@@ -253,6 +330,32 @@ export default function Detail() {
         </Section>
       )}
 
+      {opps.length > 0 && (
+        <Section title="이 회사가 선례인 기회">
+          <p className="mb-2 text-xs text-ink-400">
+            해외 여러 나라의 비슷한 회사와 묶여 한국판 가설로 만들어진 카드입니다.
+          </p>
+          <ul className="space-y-1.5">
+            {opps.map((o) => (
+              <li key={o.slug}>
+                <Link
+                  to={`/opportunities?o=${encodeURIComponent(o.slug)}`}
+                  className="flex items-start gap-2 rounded-lg border border-ink-200 p-2.5 hover:border-brand-300"
+                >
+                  <Lightbulb size={15} className="mt-0.5 shrink-0 text-amber-500" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-ink-800">{o.title}</span>
+                    <span className="text-xs text-ink-400 tabular-nums">
+                      {OPP_STAGE[o.stage] ?? o.stage} · {o.country_count}개국 선례 {o.member_count}곳
+                    </span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
       {biz.why_it_works && (
         <Section title="왜 작동하는가">
           <p className="text-sm leading-relaxed whitespace-pre-line text-ink-700">{biz.why_it_works}</p>
@@ -291,9 +394,10 @@ export default function Detail() {
         <Section title="태그">
           <div className="flex flex-wrap gap-1.5">
             {biz.tags.map((t) => (
-              <span key={t} className="rounded-md bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
+              <TagLink key={t} to={exploreLink({ q: t })} title="이 태그로 검색"
+                className="rounded-md bg-ink-100 px-2 py-0.5 text-xs text-ink-600">
                 #{t}
-              </span>
+              </TagLink>
             ))}
           </div>
         </Section>
@@ -326,6 +430,63 @@ export default function Detail() {
           반드시 원문과 1차 자료를 확인하세요.
         </p>
       </Section>
+
+      {similar.length > 0 && (
+        <Section title="비슷한 모델">
+          <p className="mb-2 text-xs text-ink-400">수익 모델 · 해자 · 산업이 겹치는 순서입니다.</p>
+          <ul className="divide-y divide-ink-100 rounded-lg border border-ink-200 bg-white">
+            {similar.map((s) => {
+              const sharedRev = (s.revenue_models ?? []).filter((m) => biz.revenue_models?.includes(m))
+              const sharedMoat = (s.moats ?? []).filter((m) => biz.moats?.includes(m))
+              const sel = compare.some((b) => b.id === s.id)
+              return (
+                <li key={s.id} className="flex items-start gap-3 p-3">
+                  <Link to={`/b/${s.slug}`} className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-ink-900 hover:text-brand-700">
+                      {s.name}
+                      <span className="ml-1.5 text-xs font-normal text-ink-400">
+                        {[s.category === biz.category ? null : labelOf('category', s.category), s.hq_country].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 line-clamp-1 text-xs text-ink-500">{s.one_liner}</span>
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {sharedRev.map((m) => (
+                        <span key={m} className="rounded bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-700">
+                          {labelOf('revenue_model', m)}
+                        </span>
+                      ))}
+                      {sharedMoat.map((m) => (
+                        <span key={m} className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] font-medium text-ink-600">
+                          {labelOf('moat', m)}
+                        </span>
+                      ))}
+                    </span>
+                  </Link>
+                  <div className="hidden shrink-0 space-y-1 sm:block">
+                    {[['capital_intensity', '자본', 'warn'], ['replicability', '복제', 'warn'], ['korea_fit', '한국', 'good']].map(([k, short, tone]) => (
+                      <div key={k} className="flex items-center gap-1.5">
+                        <span className="w-6 text-[11px] text-ink-400">{short}</span>
+                        <Scale value={s[k]} tone={tone} compact />
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleCompare(s)}
+                    title={sel ? '비교에서 제외' : '비교에 추가'}
+                    aria-label={sel ? '비교에서 제외' : '비교에 추가'}
+                    className={`shrink-0 rounded-lg border p-1.5 transition ${
+                      sel ? 'border-brand-600 bg-brand-600 text-white' : 'border-ink-200 text-ink-400 hover:border-brand-500 hover:text-brand-600'
+                    }`}
+                  >
+                    {sel ? <Check size={14} /> : <Plus size={14} />}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </Section>
+      )}
     </div>
   )
 }

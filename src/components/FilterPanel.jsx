@@ -19,11 +19,22 @@ function Chip({ active, onClick, title, children }) {
   )
 }
 
-function Group({ title, children }) {
+// 칩 설명은 title 툴팁에도 있지만 터치 기기에서는 보이지 않는다.
+// 그래서 고른 칩의 설명을 그룹 아래에 적어 무엇을 골랐는지 확인할 수 있게 한다.
+function Group({ title, children, selected = [] }) {
   return (
     <div className="border-t border-ink-100 py-3 first:border-t-0 first:pt-0">
       <h4 className="mb-2 text-xs font-semibold tracking-wide text-ink-400 uppercase">{title}</h4>
       {children}
+      {selected.filter((t) => t.description).length > 0 && (
+        <ul className="mt-2 space-y-0.5">
+          {selected.filter((t) => t.description).map((t) => (
+            <li key={t.value} className="text-xs text-ink-500">
+              <span className="font-medium text-ink-700">{t.label_ko}</span> — {t.description}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -55,7 +66,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
         )}
       </div>
 
-      <Group title="수익 모델">
+      <Group title="수익 모델" selected={(taxonomy.revenue_model ?? []).filter((t) => filters.revenue_models.includes(t.value))}>
         <div className="flex flex-wrap gap-1.5">
           {(taxonomy.revenue_model ?? []).map((t) => (
             <Chip
@@ -70,7 +81,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
         </div>
       </Group>
 
-      <Group title="고객 유형">
+      <Group title="고객 유형" selected={(taxonomy.customer_type ?? []).filter((t) => t.value === filters.customer_type)}>
         <div className="flex flex-wrap gap-1.5">
           {(taxonomy.customer_type ?? []).map((t) => (
             <Chip
@@ -85,7 +96,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
         </div>
       </Group>
 
-      <Group title="산업">
+      <Group title="산업" selected={(taxonomy.category ?? []).filter((t) => t.value === filters.category)}>
         <div className="flex flex-wrap gap-1.5">
           {(taxonomy.category ?? []).map((t) => (
             <Chip
@@ -100,7 +111,7 @@ export default function FilterPanel({ filters, setFilters, onReset, activeCount 
         </div>
       </Group>
 
-      <Group title="해자">
+      <Group title="해자" selected={(taxonomy.moat ?? []).filter((t) => filters.moats.includes(t.value))}>
         <div className="flex flex-wrap gap-1.5">
           {(taxonomy.moat ?? []).map((t) => (
             <Chip

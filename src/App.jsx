@@ -8,6 +8,8 @@ import About from './pages/About.jsx'
 import Today from './pages/Today.jsx'
 import Trends from './pages/Trends.jsx'
 import Opportunities from './pages/Opportunities.jsx'
+import CompareBar from './components/CompareBar.jsx'
+import ScrollManager from './components/ScrollManager.jsx'
 
 // GitHub Pages 는 SPA 라우팅에 404 가 나므로 HashRouter 를 쓴다 (404.html 트릭 불필요).
 
@@ -47,8 +49,9 @@ function Header() {
           <NavLink to="/compare" className={navCls} title="비교" aria-label="비교">
             <GitCompare size={15} />
             <span className="hidden sm:inline">비교</span>
+            {/* 폰 폭에서는 배지가 메뉴를 12px 넘치게 한다. 담긴 내용은 아래 비교 바가 보여주므로 숨긴다 */}
             {compare.length > 0 && (
-              <span className="ml-0.5 rounded-full bg-brand-600 px-1.5 text-xs font-semibold text-white">
+              <span className="ml-0.5 hidden rounded-full bg-brand-600 px-1.5 text-xs font-semibold text-white sm:inline">
                 {compare.length}
               </span>
             )}
@@ -67,6 +70,7 @@ export default function App() {
   return (
     <StoreProvider>
       <HashRouter>
+        <ScrollManager />
         <div className="flex min-h-screen flex-col">
           <Header />
           <main className="flex-1">
@@ -84,6 +88,7 @@ export default function App() {
           <footer className="border-t border-ink-200 py-6 text-center text-sm text-ink-500">
             BizAtlas — 전세계 비즈니스 모델을 같은 축으로 비교합니다. 매일 자동 갱신.
           </footer>
+          <CompareBar />
         </div>
       </HashRouter>
     </StoreProvider>

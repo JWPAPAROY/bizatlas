@@ -32,10 +32,13 @@ export function StoreProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(compare))
   }, [compare])
 
+  // 꽉 찬 상태에서 더 담으려 하면 버튼을 조용히 막는 대신 비교 바가 이유를 알린다 (값은 시각 — 바뀔 때마다 다시 띄움)
+  const [compareFullAt, setCompareFullAt] = useState(0)
+
   const toggleCompare = useCallback((biz) => {
     setCompare((prev) => {
       if (prev.some((b) => b.id === biz.id)) return prev.filter((b) => b.id !== biz.id)
-      if (prev.length >= MAX_COMPARE) return prev
+      if (prev.length >= MAX_COMPARE) { setCompareFullAt(Date.now()); return prev }
       return [...prev, { id: biz.id, slug: biz.slug, name: biz.name }]
     })
   }, [])
@@ -55,8 +58,8 @@ export function StoreProvider({ children }) {
   )
 
   const value = useMemo(
-    () => ({ taxonomy, labelOf, descOf, loading, compare, toggleCompare, clearCompare, MAX_COMPARE }),
-    [taxonomy, labelOf, descOf, loading, compare, toggleCompare, clearCompare],
+    () => ({ taxonomy, labelOf, descOf, loading, compare, toggleCompare, clearCompare, compareFullAt, MAX_COMPARE }),
+    [taxonomy, labelOf, descOf, loading, compare, toggleCompare, clearCompare, compareFullAt],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

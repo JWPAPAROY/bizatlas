@@ -7,8 +7,12 @@ import { kstDayKey, kstDayStart, fmtKstTime, nextRunLabel, sumRuns } from '../li
 // 홈 상단 한 줄 요약. 상세는 /today 로 넘긴다.
 // 자세한 지표를 여기서 다 보여주면 첫 화면의 주인공(탐색)을 밀어내므로 숫자 세 개만 둔다.
 
+// 마지막 값을 들고 있다가 다시 마운트될 때 바로 그린다. 처음에 비어 있다가 늘어나면
+// 상세에서 뒤로 왔을 때 복원한 스크롤 위치가 그만큼 밀린다.
+let last = null
+
 export default function TodayStrip() {
-  const [state, setState] = useState(null)
+  const [state, setState] = useState(last)
 
   useEffect(() => {
     if (!isConfigured) return
@@ -29,7 +33,7 @@ export default function TodayStrip() {
     ]).then(([newRes, runsRes]) => {
       if (!alive || newRes.error || runsRes.error) return
       const runs = runsRes.data ?? []
-      setState({
+      setState(last = {
         added: newRes.count ?? 0,
         runs,
         totals: sumRuns(runs),
