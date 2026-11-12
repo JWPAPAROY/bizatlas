@@ -27,6 +27,18 @@ async function sb(path) {
   return res.json()
 }
 
+// 행 수만 센다. `select=id` 로 받아 length 를 세면 PostgREST 의 max-rows(1000) 에 잘려
+// 실제 1,508건이 "1000건"으로 찍혔다(2026-11-12). count=exact 의 Content-Range 총계를 쓴다.
+async function sbCount(path) {
+  const res = await fetch(`${URL_}/rest/v1/${path}&limit=1`, {
+    headers: { ...H, Prefer: 'count=exact' },
+  })
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const total = Number((res.headers.get('content-range') ?? '').split('/')[1])
+  if (!Number.isFinite(total)) throw new Error(`count 응답에 총계가 없습니다: ${res.headers.get('content-range')}`)
+  return total
+}
+
 const problems = []
 const notes = []
 
@@ -91,17 +103,17 @@ try {
 
   // ── 4) 유지보수(재평가·판단 층)가 멈췄는가
   // 방금 들어온 항목이 아직 비어 있는 건 정상이다. 3일이 지나도 비어 있으면 파이프라인이 멈춘 것이다.
-  const stale = await sb(
+  const stale = await sbCount(
     `businesses?select=id&status=eq.published&created_at=lt.${hours(72)}` +
     `&or=(scored_at.is.null,decided_at.is.null)`)
-  notes.push(`3일 이상 지났는데 점수·판단 층이 빈 항목 ${stale.length}건`)
-  if (stale.length > 30) {
-    problems.push(`3일 넘게 미처리된 항목이 ${stale.length}건 — 유지보수 작업(maintain)이 멈췄습니다.`)
+  notes.push(`3일 이상 지났는데 점수·판단 층이 빈 항목 ${stale}건`)
+  if (stale > 30) {
+    problems.push(`3일 넘게 미처리된 항목이 ${stale}건 — 유지보수 작업(maintain)이 멈췄습니다.`)
   }
 
   // ── 참고 지표 (경보 아님)
-  const total = await sb('businesses?select=id&status=eq.published')
-  notes.push(`공개 항목 ${total.length}건`)
+  const total = await sbCount('businesses?select=id&status=eq.published')
+  notes.push(`공개 항목 ${total}건`)
 } catch (e) {
   problems.push(`검사 자체가 실패했습니다: ${e.message}`)
 }
