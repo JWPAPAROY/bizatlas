@@ -93,7 +93,7 @@ emerging 에 남아 있었다 → `promote_checked_at` 순환. 고친 뒤 100건
 - **DB** — Supabase Postgres (프로젝트 `skalhldjvspoaacdxgjg`, 서울 리전)
 - **수집** — Supabase Edge Function `ingest`(최신 동향) / `seed-proven`(검증 코퍼스) + Gemini
 - **검증** — Wikidata(글로벌) / DART 전자공시(한국)
-- **스케줄** — Supabase 내부 `pg_cron` + `pg_net` 이 **4시간마다**(KST 01/05/09/13/17/21시) 수집 함수를 호출한다.
+- **스케줄** — Supabase 내부 `pg_cron` + `pg_net` 이 **4시간마다**(KST 01/05/09/13/17/21시 7분, 정각 혼잡 회피) 수집 함수를 호출한다.
   외부 스케줄러(GitHub Actions)를 쓰지 않아 의존성이 하나 적고, 시크릿 사본도 GitHub 에 둘 필요가 없다.
 
 라이브: https://jwpaparoy.github.io/bizatlas/
@@ -190,9 +190,9 @@ node scripts/enrich-decision.mjs   # 아직 판단 층이 없는 것만
 
 | 무엇 | 어디서 | 언제 |
 |---|---|---|
-| 수집 (`ingest`) | Supabase pg_cron `bizatlas-ingest` | 4시간마다 (KST 01/05/09/13/17/21시) |
+| 수집 (`ingest`) | Supabase pg_cron `bizatlas-ingest` | 4시간마다 (KST 01/05/09/13/17/21시 7분) |
 | 재평가 · 판단 층 · 승격 (`maintain`) | Supabase pg_cron `bizatlas-maintain` | 매일 17:30 · 23:30 KST |
-| 이상 감지 (`healthcheck.mjs`) → 실패 시 텔레그램 | GitHub Actions `health.yml` | 매일 09:10 KST |
+| 이상 감지 (`healthcheck.mjs`) → 실패 시 텔레그램 | GitHub Actions `health.yml` | 매일 09:20 KST |
 | 주간 보고 (`weekly-report.mjs`) → 텔레그램 | GitHub Actions `weekly.yml` | 매주 월 09:30 KST |
 | 월간 보고 (`monthly-report.mjs`) → 텔레그램 | GitHub Actions `monthly.yml` | 매월 1일 09:40 KST |
 | 예약 워크플로 비활성 방지 (60일 규칙) | GitHub Actions `keepalive.yml` | 매월 1·15일 12:00 KST |

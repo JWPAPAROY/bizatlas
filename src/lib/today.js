@@ -37,13 +37,18 @@ export const fmtKstTime = (ts) =>
     minute: '2-digit',
   })
 
-// pg_cron `0 */4 * * *` = UTC 0/4/8/12/16/20시 → KST 09/13/17/21/01/05시
+// pg_cron `7 */4 * * *` = UTC 0/4/8/12/16/20시 7분 → KST 01/05/09/13/17/21시 7분.
+// 정각(:00)을 피한 이유: 00:00 UTC 정각 실행이 플랫폼 혼잡으로 503 에 잘렸다(2026-11-10·12).
+// cron 정의는 supabase/migrations/20261112000000_ingest_cron_offset.sql — 바꾸면 여기도 같이.
 const RUN_HOURS_KST = [1, 5, 9, 13, 17, 21]
+const RUN_MINUTE = 7
 
 export function nextRunLabel() {
-  const kstHour = new Date(Date.now() + KST_OFFSET).getUTCHours()
-  const next = RUN_HOURS_KST.find((h) => h > kstHour)
-  return `${String(next ?? RUN_HOURS_KST[0]).padStart(2, '0')}:00${next ? '' : ' (내일)'}`
+  const now = new Date(Date.now() + KST_OFFSET)
+  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes()
+  const next = RUN_HOURS_KST.find((h) => h * 60 + RUN_MINUTE > nowMin)
+  const hh = String(next ?? RUN_HOURS_KST[0]).padStart(2, '0')
+  return `${hh}:${String(RUN_MINUTE).padStart(2, '0')}${next != null ? '' : ' (내일)'}`
 }
 
 /** 실행 여러 건의 fetched/created/skipped/failed 합계 */
